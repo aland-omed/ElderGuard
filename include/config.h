@@ -54,6 +54,21 @@
 #define AUDIO_FALL_DETECTED 2
 #define AUDIO_EMERGENCY 1
 
+// WiFi and Time Management Constants
+// ------------------------------
+#define WIFI_SSID "AVIV"        // Default SSID
+#define WIFI_PASSWORD "$$$$$$$$M"      // Default password
+#define WIFI_CONNECT_TIMEOUT_MS 30000         // WiFi connection timeout (30 sec)
+#define WIFI_RECONNECT_INTERVAL_MS 60000      // Attempt reconnection every minute
+#define WIFI_TASK_INTERVAL_MS 5000            // Check WiFi status every 5 seconds
+
+#define NTP_SERVER "pool.ntp.org"             // Primary NTP server
+#define NTP_FALLBACK_SERVER "time.google.com" // Fallback NTP server
+#define GMT_OFFSET_SEC 7200                      // Set your timezone (e.g., UTC+0)
+#define DAYLIGHT_OFFSET_SEC 3600              // Daylight saving time offset (1 hour)
+#define TIME_SYNC_INTERVAL_MS 3600000         // Resync time every hour (3600000 ms)
+#define TIME_TASK_INTERVAL_MS 15000           // Check time status every 15 seconds
+
 // Data Structures
 // ------------------------------
 
@@ -98,5 +113,24 @@ typedef struct {
     int repeatCount;
     int volume;
 } AudioCommand;
+
+// WiFi Status Structure
+typedef struct {
+    bool connected;
+    int rssi;
+    char ip[16];
+    unsigned long lastConnectAttempt;
+    int failureCount;
+    unsigned long lastStatusCheck;
+} WiFiStatus;
+
+// Time Synchronization Structure
+typedef struct {
+    bool synchronized;
+    unsigned long lastSyncTimestamp;
+    time_t currentEpoch;
+    char timeString[32];
+    unsigned long lastCheck;
+} TimeStatus;
 
 #endif // CONFIG_H

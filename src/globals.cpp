@@ -14,6 +14,8 @@ SemaphoreHandle_t gpsDataSemaphore;
 SemaphoreHandle_t fallDetectionSemaphore;
 SemaphoreHandle_t medicationSemaphore;
 SemaphoreHandle_t audioCommandSemaphore;
+SemaphoreHandle_t wifiStatusSemaphore;
+SemaphoreHandle_t timeStatusSemaphore;
 
 // Shared ECG Data
 volatile EcgData currentEcgData;
@@ -34,3 +36,11 @@ volatile bool medicationReminderUpdated = false;
 // Shared Audio Command Data
 volatile AudioCommand currentAudioCommand;
 volatile bool audioCommandUpdated = false;
+
+// Shared WiFi Status Data
+volatile WiFiStatus currentWiFiStatus;
+volatile bool wifiStatusUpdated = false;
+
+// Shared Time Status Data
+volatile TimeStatus currentTimeStatus;
+volatile bool timeStatusUpdated = false;

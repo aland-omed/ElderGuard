@@ -20,6 +20,8 @@
 #include "../include/screen_task.h"
 #include "../include/audio_task.h"
 #include "../include/medication_task.h"
+#include "../include/wifi_task.h"
+#include "../include/time_task.h"
 
 // Task handles
 TaskHandle_t ecgTaskHandle = NULL;
@@ -28,6 +30,8 @@ TaskHandle_t fallDetectionTaskHandle = NULL;
 TaskHandle_t screenTaskHandle = NULL;
 TaskHandle_t audioTaskHandle = NULL;
 TaskHandle_t medicationTaskHandle = NULL;
+TaskHandle_t wifiTaskHandle = NULL;
+TaskHandle_t timeTaskHandle = NULL;
 
 // Function declarations
 void initHardware();
@@ -51,6 +55,30 @@ void setup() {
   fallDetectionSemaphore = xSemaphoreCreateBinary();
   medicationSemaphore = xSemaphoreCreateBinary();
   audioCommandSemaphore = xSemaphoreCreateBinary();
+  wifiStatusSemaphore = xSemaphoreCreateBinary();
+  timeStatusSemaphore = xSemaphoreCreateBinary();
+  
+  // Create WiFi task first to establish connectivity
+  xTaskCreatePinnedToCore(
+    wifiTask,               // Task function
+    "WiFi",                 // Name 
+    4096,                   // Stack size (bytes)
+    NULL,                   // Parameters
+    10,                     // Priority (very high - needed for other services)
+    &wifiTaskHandle,        // Task handle
+    0                       // Core (0=Protocol core is better for network tasks)
+  );
+  
+  // Create time task next to ensure time synchronization
+  xTaskCreatePinnedToCore(
+    timeTask,               // Task function
+    "Time",                 // Name 
+    4096,                   // Stack size (bytes)
+    NULL,                   // Parameters
+    9,                      // Priority (high - needed for timestamping)
+    &timeTaskHandle,        // Task handle
+    0                       // Core (0=Protocol core)
+  );
   
   // Create tasks with appropriate priorities
   // Higher number means higher priority

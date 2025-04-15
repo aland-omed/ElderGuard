@@ -19,6 +19,8 @@ extern SemaphoreHandle_t gpsDataSemaphore;
 extern SemaphoreHandle_t fallDetectionSemaphore;
 extern SemaphoreHandle_t medicationSemaphore;
 extern SemaphoreHandle_t audioCommandSemaphore;
+extern SemaphoreHandle_t wifiStatusSemaphore;
+extern SemaphoreHandle_t timeStatusSemaphore;
 
 // Shared ECG Data
 extern volatile EcgData currentEcgData;
@@ -39,5 +41,13 @@ extern volatile bool medicationReminderUpdated;
 // Shared Audio Command Data
 extern volatile AudioCommand currentAudioCommand;
 extern volatile bool audioCommandUpdated;
+
+// Shared WiFi Status Data
+extern volatile WiFiStatus currentWiFiStatus;
+extern volatile bool wifiStatusUpdated;
+
+// Shared Time Status Data
+extern volatile TimeStatus currentTimeStatus;
+extern volatile bool timeStatusUpdated;
 
 #endif // GLOBALS_H
