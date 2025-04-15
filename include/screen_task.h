@@ -20,5 +20,6 @@ void screenTask(void *pvParameters);
 void displayMainScreen();
 void displayMedicationReminder(const char* medicationName);
 void displayEcgWaveform(int* buffer, int bufferSize, int bufferIndex);
+void displayFallAlert();
 
 #endif // SCREEN_TASK_H

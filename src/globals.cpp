@@ -44,3 +44,6 @@ volatile bool wifiStatusUpdated = false;
 // Shared Time Status Data
 volatile TimeStatus currentTimeStatus;
 volatile bool timeStatusUpdated = false;
+
+// Flag for display update requests
+volatile bool needsDisplayUpdate = false;

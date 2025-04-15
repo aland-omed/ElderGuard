@@ -53,13 +53,64 @@ const unsigned char PROGMEM locationIcon[] = {
     0xFF, 0xFF, 0x66, 0x00
 };
 
+// WiFi signal strength icons (8x8) - Improved designs
+const unsigned char PROGMEM wifiNone[] = {
+    0x00, 0x00, 0x00, 0x1C,
+    0x22, 0x22, 0x1C, 0x00
+};
+
+const unsigned char PROGMEM wifiWeak[] = {
+    0x00, 0x00, 0x00, 0x00, 
+    0x00, 0x00, 0x18, 0x18
+};
+
+const unsigned char PROGMEM wifiMedium[] = {
+    0x00, 0x00, 0x00, 0x00,
+    0x3C, 0x3C, 0x18, 0x18
+};
+
+const unsigned char PROGMEM wifiStrong[] = {
+    0x00, 0x00, 0x7E, 0x7E,
+    0x3C, 0x3C, 0x18, 0x18
+};
+
 // Current values to display
 int currentHeartRate = 0;
 char currentMedicationName[32] = "";
 bool medicationAlertActive = false;
 
-// Flag to indicate if display needs immediate update
-bool needsDisplayUpdate = false;
+// Function to draw WiFi signal strength icon
+void drawWifiIcon(int rssi) {
+    // RSSI values typically range from -100 (weak) to -30 (strong)
+    // Convert to a 0-3 scale for icon selection
+    int signalStrength;
+    
+    if (rssi < -85) {
+        signalStrength = 0; // No/very weak signal
+    } else if (rssi < -70) {
+        signalStrength = 1; // Weak signal
+    } else if (rssi < -55) {
+        signalStrength = 2; // Medium signal
+    } else {
+        signalStrength = 3; // Strong signal
+    }
+    
+    // Draw the appropriate icon
+    switch (signalStrength) {
+        case 0:
+            display.drawBitmap(SCREEN_WIDTH - 12, 2, wifiNone, 8, 8, SH110X_WHITE);
+            break;
+        case 1:
+            display.drawBitmap(SCREEN_WIDTH - 12, 2, wifiWeak, 8, 8, SH110X_WHITE);
+            break;
+        case 2:
+            display.drawBitmap(SCREEN_WIDTH - 12, 2, wifiMedium, 8, 8, SH110X_WHITE);
+            break;
+        case 3:
+            display.drawBitmap(SCREEN_WIDTH - 12, 2, wifiStrong, 8, 8, SH110X_WHITE);
+            break;
+    }
+}
 
 void screenTask(void *pvParameters) {
     Serial.println("Screen Task: Started");
@@ -125,6 +176,25 @@ void screenTask(void *pvParameters) {
             strftime(timeString, sizeof(timeString), "%H:%M:%S", &timeinfo);
         }
         
+        // Check for fall detection using semaphore (non-blocking)
+        if (xSemaphoreTake(fallDetectionSemaphore, 0) == pdTRUE) {
+            if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                // Check if this is a fall event or a reset
+                if (currentFallEvent.fallDetected) {
+                    Serial.println("Screen Task: Fall detected! Updating display...");
+                    displayFallAlert();
+                } else {
+                    Serial.println("Screen Task: Fall event reset after 40 seconds. Returning to main screen.");
+                    displayMainScreen();
+                }
+                xSemaphoreGive(displayMutex);
+                needsDisplayUpdate = false; // Already handled the update
+                
+                // Wait a bit to ensure the alert is visible
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+        }
+        
         // Check for new ECG data using semaphore (non-blocking)
         if (xSemaphoreTake(ecgDataSemaphore, 0) == pdTRUE) {
             // ECG data was updated - access the shared data
@@ -182,7 +252,9 @@ void screenTask(void *pvParameters) {
             // Take the display mutex
             if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                 // Update display based on current state
-                if (medicationAlertActive) {
+                if (fallDetectionUpdated && currentFallEvent.fallDetected) {
+                    displayFallAlert();
+                } else if (medicationAlertActive) {
                     displayMedicationReminder(currentMedicationName);
                 } else {
                     displayMainScreen();
@@ -217,6 +289,14 @@ void displayMainScreen() {
     int x = (SCREEN_WIDTH - w) / 2;
     display.setCursor(x, 2);
     display.print(timeString);
+    
+    // WiFi signal strength indicator - Top right
+    if (wifiStatusUpdated) {
+        drawWifiIcon(currentWiFiStatus.rssi);
+    } else {
+        // Default to no signal if WiFi status unknown
+        display.drawBitmap(SCREEN_WIDTH - 12, 2, wifiNone, 8, 8, SH110X_WHITE);
+    }
 
     // Horizontal line below time
     display.drawFastHLine(0, 12, SCREEN_WIDTH, SH110X_WHITE);
@@ -266,17 +346,11 @@ void displayMainScreen() {
     // Status bar - Bottom
     display.setCursor(2, 52);
     display.print("GPS: ");
-    // Check GPS status from globals
-    if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        display.print(currentGpsData.validFix ? "Active" : "Searching");
-        xSemaphoreGive(displayMutex);
-    } else {
-        display.print("Unknown");
-    }
+    // Check GPS status directly - we already have the mutex when this function is called
+    display.print(currentGpsData.validFix ? "Active" : "Searching");
 
-    // // Battery indicator placeholder
-    // display.setCursor(90, 52);
-    // display.print("Batt:OK");
+    // Display the GPS icon
+    display.drawBitmap(65, 52, locationIcon, 8, 8, SH110X_WHITE);
 
     display.display();
 }
@@ -292,6 +366,14 @@ void displayMedicationReminder(const char* medicationName) {
     
     // Draw pill icon
     display.drawBitmap(60, 2, pillIcon, 8, 8, SH110X_WHITE);
+    
+    // WiFi signal strength indicator - Top right
+    if (wifiStatusUpdated) {
+        drawWifiIcon(currentWiFiStatus.rssi);
+    } else {
+        // Default to no signal if WiFi status unknown
+        display.drawBitmap(SCREEN_WIDTH - 12, 2, wifiNone, 8, 8, SH110X_WHITE);
+    }
     
     // Medicine name (larger text)
     display.setTextSize(2);
@@ -313,4 +395,37 @@ void displayMedicationReminder(const char* medicationName) {
     display.print(timeString);
     
     display.display();
+}
+
+// Add fall alert screen display function
+void displayFallAlert() {
+  display.clearDisplay();
+  
+  // Make the text prominent with large size and flashing
+  display.setTextSize(2);
+  display.setTextColor(SH110X_WHITE);
+  
+  // Center and display the alert message
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds("FALL", 0, 0, &x1, &y1, &w, &h);
+  int x = (SCREEN_WIDTH - w) / 2;
+  display.setCursor(x, 15);
+  display.println("FALL");
+  
+  display.getTextBounds("DETECTED", 0, 0, &x1, &y1, &w, &h);
+  x = (SCREEN_WIDTH - w) / 2;
+  display.setCursor(x, 40);
+  display.println("DETECTED");
+  
+  // Display fall severity if available
+  if (fallDetectionUpdated && currentFallEvent.fallDetected) {
+    display.setTextSize(1);
+    char severityStr[20];
+    sprintf(severityStr, "Severity: %d/10", currentFallEvent.fallSeverity);
+    display.setCursor(25, 60);
+    display.print(severityStr);
+  }
+  
+  display.display();
 }

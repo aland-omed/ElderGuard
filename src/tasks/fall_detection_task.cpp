@@ -22,14 +22,21 @@ Adafruit_MPU6050 mpu;
 // Configuration parameters
 struct FallConfig {
   // Fall detection thresholds
-  float freefallThreshold = 4.0;          // m/s² - Low acceleration indicates freefall
-  float impactThreshold = 24.0;           // m/s² - High acceleration indicates impact
-  float orientationChangeThreshold = 45.0; // degrees - Orientation change after fall
+  float freefallThreshold = 6.0;          // m/s² - Increased from 5.0 to be more sensitive
+  float impactThreshold = 16.0;           // m/s² - Reduced from 20.0 to detect lighter impacts
+  float orientationChangeThreshold = 15.0; // degrees - Reduced from 25.0 to require less rotation
+  
+  // Fall detection options
+  bool requireOrientationChange = false;   // Disabled for easier detection
+  bool requireConsistentAcceleration = true; // Still verifying basic acceleration pattern
   
   // Timing parameters
-  unsigned long minFreefallDuration = 150;  // ms - Minimum time in freefall state
-  unsigned long maxFreefallWindow = 1000;   // ms - Maximum time between freefall and impact
-  unsigned long fallResetTime = 3000;       // ms - Time before system resets after fall
+  unsigned long minFreefallDuration = 70;   // ms - Reduced from 100ms for quicker detection
+  unsigned long maxFreefallWindow = 450;    // ms - Increased window for more detection opportunities
+  unsigned long fallResetTime = 40000;      // ms - Time before system resets after fall (increased to 40 seconds)
+  
+  // Consecutive confirmations needed
+  int requiredConsecutiveImpacts = 1;     // Reduced from 2 to only require a single impact
 };
 
 // Orientation tracking structure
@@ -59,6 +66,11 @@ unsigned long fallDetectedTime = 0;
 float peakAcceleration = 0.0;
 float minAcceleration = 9.8;
 const float ALPHA = 0.8; // Low-pass filter coefficient
+
+// Impact counter for consecutive readings
+int consecutiveImpacts = 0;
+float previousAccMagnitude = 0;
+float accelerationIntegral = 0; // For tracking consistent acceleration
 
 void fallDetectionTask(void *pvParameters) {
   Serial.println("Fall Detection Task: Started");
@@ -180,9 +192,17 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
     minAcceleration = accMagnitude;
   }
   
+  // Track acceleration change pattern
+  float accChange = accMagnitude - previousAccMagnitude;
+  previousAccMagnitude = accMagnitude;
+  
   // Fall detection state machine
   switch (currentState) {
     case MONITORING:
+      // Reset counters and integrals when in monitoring state
+      consecutiveImpacts = 0;
+      accelerationIntegral = 0;
+      
       // Look for potential freefall condition
       if (accMagnitude < config.freefallThreshold) {
         currentState = POTENTIAL_FALL;
@@ -195,21 +215,33 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
       break;
       
     case POTENTIAL_FALL:
+      // Calculate acceleration integral for pattern recognition
+      accelerationIntegral += accMagnitude;
+      
       // Confirm freefall persists for minimum duration
       if (currentTime - stateStartTime >= config.minFreefallDuration) {
         // Look for impact
         if (accMagnitude > config.impactThreshold) {
-          currentState = IMPACT_DETECTED;
-          stateStartTime = currentTime;
+          // Count this as one impact
+          consecutiveImpacts++;
           
           Serial.print("Fall Detection: Impact detected - Acceleration: ");
-          Serial.println(accMagnitude);
+          Serial.print(accMagnitude);
+          Serial.print(", Count: ");
+          Serial.println(consecutiveImpacts);
+          
+          // Check if we have enough consecutive impact readings
+          if (consecutiveImpacts >= config.requiredConsecutiveImpacts) {
+            currentState = IMPACT_DETECTED;
+            stateStartTime = currentTime;
+          }
         }
       }
       
       // Reset if no impact detected within window
       if (currentTime - stateStartTime > config.maxFreefallWindow) {
         currentState = MONITORING;
+        consecutiveImpacts = 0;
         Serial.println("Fall Detection: Potential fall timeout - No impact detected");
       }
       break;
@@ -224,7 +256,21 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
           fabs(pitchChange) > config.orientationChangeThreshold || 
           fabs(rollChange) > config.orientationChangeThreshold;
         
-        if (significantOrientationChange) {
+        // Check acceleration pattern consistency
+        bool accelerationPatternValid = true;
+        if (config.requireConsistentAcceleration) {
+          // A valid fall should have significant acceleration change over time
+          // This helps filter out gentle movements and vibrations
+          float avgAcceleration = accelerationIntegral / (currentTime - stateStartTime + 1);
+          accelerationPatternValid = (avgAcceleration > 3.0) && 
+                                    (peakAcceleration - minAcceleration > 10.0);
+        }
+        
+        // Enhanced fall detection with multiple criteria
+        bool fallDetected = accelerationPatternValid && 
+                          (!config.requireOrientationChange || significantOrientationChange);
+        
+        if (fallDetected) {
           currentState = FALL_CONFIRMED;
           fallDetectedTime = currentTime;
           
@@ -243,9 +289,9 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
             xSemaphoreGive(audioCommandSemaphore);
           }
         } else {
-          // No significant orientation change - likely not a fall
+          // Not a fall
           currentState = MONITORING;
-          Serial.println("Fall Detection: No significant orientation change - Not a fall");
+          Serial.println("Fall Detection: Movement pattern doesn't match a fall");
         }
       }
       break;
@@ -256,7 +302,20 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
         currentState = MONITORING;
         peakAcceleration = 0;
         minAcceleration = 9.8;
-        Serial.println("Fall Detection: Reset to monitoring state");
+        consecutiveImpacts = 0;
+        accelerationIntegral = 0;
+        
+        // Reset global fall status
+        if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+          currentFallEvent.fallDetected = false;
+          fallDetectionUpdated = true;
+          xSemaphoreGive(displayMutex);
+          
+          // Signal other tasks about the reset
+          xSemaphoreGive(fallDetectionSemaphore);
+        }
+        
+        Serial.println("Fall Detection: Reset to monitoring state after 40 seconds");
       }
       break;
   }
@@ -298,6 +357,8 @@ void reportFallEvent(float pitchChange, float rollChange) {
     currentFallEvent.timestamp = millis();
     currentFallEvent.fallSeverity = map(peakAcceleration, config.impactThreshold, 40.0, 1, 10);
     fallDetectionUpdated = true;
+    
+    // Removed display update flag as we only need sound alerts
     
     // Release mutex
     xSemaphoreGive(displayMutex);

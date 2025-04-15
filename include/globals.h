@@ -50,4 +50,7 @@ extern volatile bool wifiStatusUpdated;
 extern volatile TimeStatus currentTimeStatus;
 extern volatile bool timeStatusUpdated;
 
+// Flag for display update requests
+extern volatile bool needsDisplayUpdate;
+
 #endif // GLOBALS_H
