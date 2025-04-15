@@ -1,31 +1,24 @@
 /**
- * ElderGuard - Screen Task
+ * ElderGuard - Screen Display Task
  * 
- * This file declares the screen task interface for the OLED display.
+ * This file contains the headers for the screen display task
+ * that manages the OLED display for the ElderGuard system.
  */
 
 #ifndef SCREEN_TASK_H
 #define SCREEN_TASK_H
 
 #include <Arduino.h>
-#include <Wire.h>
-#include <WiFi.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SH110X.h>
-#include <time.h>
 #include "config.h"
+#include "globals.h"
+
+// ECG Buffer size (needs to match the size in ecg_task.cpp)
+#define ECG_BUFFER_SIZE 250
 
 // Function prototypes
 void screenTask(void *pvParameters);
 void displayMainScreen();
-void displayFallAlert();
 void displayMedicationReminder(const char* medicationName);
-void showWelcomeScreen();
-void updateTime();
-void connectToWiFi();
-void checkEcgQueue();
-void checkGpsQueue();
-void checkFallQueue();
-void checkMedicationQueue();
+void displayEcgWaveform(int* buffer, int bufferSize, int bufferIndex);
 
 #endif // SCREEN_TASK_H

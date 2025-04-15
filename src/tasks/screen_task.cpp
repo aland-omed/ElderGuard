@@ -14,13 +14,7 @@
 #include <time.h>
 #include "../include/screen_task.h"
 #include "../include/config.h"
-
-// External queue handles declared in main.cpp
-extern QueueHandle_t ecgDataQueue;
-extern QueueHandle_t gpsDataQueue;
-extern QueueHandle_t fallDetectionQueue;
-extern QueueHandle_t medicationQueue;
-extern SemaphoreHandle_t displayMutex;
+#include "../include/globals.h"
 
 // -------------------- Display --------------------
 #define SCREEN_WIDTH 128
@@ -63,8 +57,9 @@ const unsigned char PROGMEM locationIcon[] = {
 int currentHeartRate = 0;
 char currentMedicationName[32] = "";
 bool medicationAlertActive = false;
-bool fallAlertActive = false;
-bool gpsFixValid = false;
+
+// Flag to indicate if display needs immediate update
+bool needsDisplayUpdate = false;
 
 void screenTask(void *pvParameters) {
     Serial.println("Screen Task: Started");
@@ -97,51 +92,6 @@ void screenTask(void *pvParameters) {
     display.display();
     
     // Show welcome screen
-    showWelcomeScreen();
-    
-    // Variables for task timing
-    unsigned long lastUpdateTime = 0;
-    const unsigned long updateInterval = 1000; // Update display every 1 second
-    
-    // Main task loop
-    while (true) {
-        // Get current time
-        updateTime();
-        
-        // Check queues for new data
-        checkEcgQueue();
-        checkGpsQueue();
-        checkFallQueue();
-        checkMedicationQueue();
-        
-        // Update display at regular intervals
-        unsigned long currentTime = millis();
-        if (currentTime - lastUpdateTime >= updateInterval) {
-            lastUpdateTime = currentTime;
-            
-            // Take the display mutex
-            if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-                // Update display based on current state
-                if (fallAlertActive) {
-                    displayFallAlert();
-                } else if (medicationAlertActive) {
-                    displayMedicationReminder(currentMedicationName);
-                } else {
-                    displayMainScreen();
-                }
-                
-                // Release the display mutex
-                xSemaphoreGive(displayMutex);
-            }
-        }
-        
-        // Small delay to prevent task from hogging CPU
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-}
-
-// -------------------- Welcome --------------------
-void showWelcomeScreen() {
     display.clearDisplay();
     
     // Use textSize 2 for a better fit
@@ -159,6 +109,99 @@ void showWelcomeScreen() {
     display.println("ElderGuard");
     display.display();
     delay(3000);
+    
+    // Variables for task timing
+    unsigned long lastUpdateTime = 0;
+    unsigned long lastHeartRateUpdateTime = 0;
+    const unsigned long updateInterval = 1000; // Update display every 1 second
+    
+    // Main task loop
+    while (true) {
+        // Get current time
+        struct tm timeinfo;
+        if (!getLocalTime(&timeinfo)) {
+            strcpy(timeString, "??:??:??");
+        } else {
+            strftime(timeString, sizeof(timeString), "%H:%M:%S", &timeinfo);
+        }
+        
+        // Check for new ECG data using semaphore (non-blocking)
+        if (xSemaphoreTake(ecgDataSemaphore, 0) == pdTRUE) {
+            // ECG data was updated - access the shared data
+            if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                // Always update heart rate display regardless of signal validity
+                int prevHeartRate = currentHeartRate;
+                currentHeartRate = currentEcgData.heartRate;
+                
+                // Log when heart rate changes
+                if (prevHeartRate != currentHeartRate) {
+                    Serial.printf("Screen Task: Heart rate updated from %d to %d (Signal: %s)\n", 
+                                 prevHeartRate, currentHeartRate,
+                                 currentEcgData.validSignal ? "Valid" : "Invalid");
+                    lastHeartRateUpdateTime = millis();
+                    needsDisplayUpdate = true;
+                }
+                
+                // Force update every 2 seconds even if the heart rate hasn't changed
+                // This ensures "NO SIGNAL" is displayed when sensors are disconnected
+                unsigned long currentMillis = millis();
+                if (currentMillis - lastHeartRateUpdateTime > 2000) {
+                    lastHeartRateUpdateTime = currentMillis;
+                    needsDisplayUpdate = true;
+                    Serial.println("Screen Task: Forcing display update for heart rate");
+                }
+                
+                xSemaphoreGive(displayMutex);
+            }
+        }
+        
+        // Check for medication reminders using semaphore
+        if (xSemaphoreTake(medicationSemaphore, 0) == pdTRUE) {
+            if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                if (!currentMedicationReminder.taken) {
+                    medicationAlertActive = true;
+                    // Fix volatile char pointer issue with character-by-character copy
+                    for (size_t i = 0; i < sizeof(currentMedicationName) - 1 && i < sizeof(currentMedicationReminder.name); i++) {
+                        currentMedicationName[i] = currentMedicationReminder.name[i];
+                        if (currentMedicationReminder.name[i] == '\0') break;
+                    }
+                    currentMedicationName[sizeof(currentMedicationName) - 1] = '\0'; // Ensure null termination
+                } else {
+                    medicationAlertActive = false;
+                }
+                needsDisplayUpdate = true;
+                xSemaphoreGive(displayMutex);
+            }
+        }
+        
+        // Update display at regular intervals or when new data received
+        unsigned long currentTime = millis();
+        if (needsDisplayUpdate || currentTime - lastUpdateTime >= updateInterval) {
+            lastUpdateTime = currentTime;
+            
+            // Take the display mutex
+            if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                // Update display based on current state
+                if (medicationAlertActive) {
+                    displayMedicationReminder(currentMedicationName);
+                } else {
+                    displayMainScreen();
+                }
+                
+                // Release the display mutex
+                xSemaphoreGive(displayMutex);
+                needsDisplayUpdate = false;
+            }
+        }
+        
+        // Debug: Check for stale heart rate data
+        if (currentTime - lastHeartRateUpdateTime > 5000) {
+            Serial.println("Screen Task: WARNING - No heart rate updates for 5+ seconds");
+        }
+        
+        // Small delay to prevent task from hogging CPU
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
 }
 
 // -------------------- Main Display --------------------
@@ -166,67 +209,75 @@ void displayMainScreen() {
     display.clearDisplay();
     display.setTextColor(SH110X_WHITE);
 
-    // Time - Top left
+    // Time - Top center
     display.setTextSize(1);
-    display.setCursor(2, 2);
+    int16_t x1, y1;
+    uint16_t w, h;
+    display.getTextBounds(timeString, 0, 0, &x1, &y1, &w, &h);
+    int x = (SCREEN_WIDTH - w) / 2;
+    display.setCursor(x, 2);
     display.print(timeString);
 
-    // Medicine with pill icon - Center left
-    // Draw pill icon
-    display.drawBitmap(5, 30, pillIcon, 8, 8, SH110X_WHITE);
-    display.setCursor(15, 32);
-    display.print("Medicine: ");
-    display.println(strlen(currentMedicationName) > 0 ? currentMedicationName : "None");
+    // Horizontal line below time
+    display.drawFastHLine(0, 12, SCREEN_WIDTH, SH110X_WHITE);
 
-    // Heart Rate with small heart icon - Bottom left
-    display.drawBitmap(3, 53, heartIconSmall, 8, 8, SH110X_WHITE);
-    display.setCursor(13, 55);
+    // Heart Rate with heart icon - Left section
+    display.drawBitmap(5, 18, heartIconSmall, 8, 8, SH110X_WHITE);
+    display.setCursor(15, 18);
     sprintf(heartRateStr, "%d BPM", currentHeartRate);
     display.print(heartRateStr);
 
-    // GPS status - Top right
-    if (gpsFixValid) {
-        display.drawBitmap(SCREEN_WIDTH - 10, 2, locationIcon, 8, 8, SH110X_WHITE);
+    // Draw heart health status indicator
+    display.setCursor(5, 30);
+    if (currentHeartRate > 0) {
+        if (currentHeartRate < 60) {
+            display.print("LOW RATE");
+        } else if (currentHeartRate > 100) {
+            display.print("HIGH RATE");
+        } else {
+            display.print("NORMAL");
+        }
     } else {
-        display.drawRect(SCREEN_WIDTH - 10, 2, 8, 8, SH110X_WHITE);
+        display.print("NO SIGNAL");
     }
 
-    display.display();
-}
+    // Middle divider
+    display.drawFastVLine(SCREEN_WIDTH/2 - 2, 14, 32, SH110X_WHITE);
 
-void displayFallAlert() {
-    display.clearDisplay();
-    display.setTextColor(SH110X_WHITE);
+    // Medicine with pill icon - Right section
+    display.drawBitmap(SCREEN_WIDTH/2 + 5, 18, pillIcon, 8, 8, SH110X_WHITE);
+    display.setCursor(SCREEN_WIDTH/2 + 15, 18);
+    display.print("Medicine");
     
-    // Large text for fall alert
-    display.setTextSize(2);
-    
-    // Center text
-    int16_t x1, y1;
-    uint16_t w, h;
-    display.getTextBounds("FALL", 0, 0, &x1, &y1, &w, &h);
-    int x = (SCREEN_WIDTH - w) / 2;
-    
-    display.setCursor(x, 5);
-    display.println("FALL");
-    
-    display.getTextBounds("DETECTED", 0, 0, &x1, &y1, &w, &h);
-    x = (SCREEN_WIDTH - w) / 2;
-    
-    display.setCursor(x, 25);
-    display.println("DETECTED");
-    
-    // Flash the display
-    static bool flashState = false;
-    flashState = !flashState;
-    
-    if (flashState) {
-        // Invert display for flashing effect
-        display.invertDisplay(true);
+    display.setCursor(SCREEN_WIDTH/2 + 5, 30);
+    if (strlen(currentMedicationName) > 0) {
+        // Truncate long medication names
+        char shortName[10] = ""; // Buffer for shortened name
+        strncpy(shortName, currentMedicationName, 9);
+        shortName[9] = '\0'; // Ensure null termination
+        display.print(shortName);
     } else {
-        display.invertDisplay(false);
+        display.print("None due");
     }
-    
+
+    // Horizontal line
+    display.drawFastHLine(0, 46, SCREEN_WIDTH, SH110X_WHITE);
+
+    // Status bar - Bottom
+    display.setCursor(2, 52);
+    display.print("GPS: ");
+    // Check GPS status from globals
+    if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        display.print(currentGpsData.validFix ? "Active" : "Searching");
+        xSemaphoreGive(displayMutex);
+    } else {
+        display.print("Unknown");
+    }
+
+    // // Battery indicator placeholder
+    // display.setCursor(90, 52);
+    // display.print("Batt:OK");
+
     display.display();
 }
 
@@ -262,55 +313,4 @@ void displayMedicationReminder(const char* medicationName) {
     display.print(timeString);
     
     display.display();
-}
-
-// -------------------- Update Time --------------------
-void updateTime() {
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) {
-        strcpy(timeString, "??:??:??");
-        return;
-    }
-    strftime(timeString, sizeof(timeString), "%H:%M:%S", &timeinfo);
-}
-
-void checkEcgQueue() {
-    EcgData ecgData;
-    
-
-    if (xQueueReceive(ecgDataQueue, &ecgData, 0) == pdTRUE) {
-        if (ecgData.validSignal) {
-          
-            currentHeartRate = ecgData.heartRate;
-        }
-    }
-}
-
-void checkGpsQueue() {
-    GpsData gpsData;
-    if (xQueueReceive(gpsDataQueue, &gpsData, 0) == pdTRUE) {
-        gpsFixValid = gpsData.validFix;
-    }
-}
-
-void checkFallQueue() {
-    FallEvent fallEvent;
-    if (xQueueReceive(fallDetectionQueue, &fallEvent, 0) == pdTRUE) {
-        if (fallEvent.fallDetected) {
-            fallAlertActive = true;
-        }
-    }
-}
-
-void checkMedicationQueue() {
-    MedicationReminder medReminder;
-    if (xQueueReceive(medicationQueue, &medReminder, 0) == pdTRUE) {
-        if (!medReminder.taken) {
-            medicationAlertActive = true;
-            strncpy(currentMedicationName, medReminder.name, sizeof(currentMedicationName) - 1);
-            currentMedicationName[sizeof(currentMedicationName) - 1] = '\0'; // Ensure null termination
-        } else {
-            medicationAlertActive = false;
-        }
-    }
 }

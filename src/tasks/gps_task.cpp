@@ -2,8 +2,7 @@
  * ElderGuard - GPS Task Implementation
  * 
  * This file implements the GPS tracking task using the GY-NEO6MV2 module.
- * It retrieves longitude and latitude and sends data through MQTT every second
- * and through HTTP every 40 seconds.
+ * It retrieves longitude and latitude and signals other tasks through semaphores.
  */
 
 #include <Arduino.h>
@@ -12,19 +11,14 @@
 #include <TinyGPS++.h>
 #include "../include/gps_task.h"
 #include "../include/config.h"
-
-// External queue handle declared in main.cpp
-extern QueueHandle_t gpsDataQueue;
+#include "../include/globals.h"
 
 // TinyGPS++ object
 TinyGPSPlus gps;
 
-// Variables for MQTT and HTTP publishing
-unsigned long lastMqttPublish = 0;
+// Variables for data publishing
+unsigned long lastDataUpdate = 0;
 unsigned long lastHttpPublish = 0;
-
-// GPS data structure
-GpsData currentGpsData;
 
 void gpsTask(void *pvParameters) {
   Serial.println("GPS Task: Started");
@@ -39,18 +33,25 @@ void gpsTask(void *pvParameters) {
     // Process GPS data at regular intervals
     unsigned long currentTime = millis();
     
-    // Update GPS data
-    updateGpsData(currentTime);
-    
-    // MQTT publishing (every second)
-    if (currentTime - lastMqttPublish >= MQTT_PUBLISH_INTERVAL_MS) {
-      lastMqttPublish = currentTime;
+    // Update GPS data at regular intervals
+    if (currentTime - lastDataUpdate >= GPS_UPDATE_INTERVAL_MS) {
+      lastDataUpdate = currentTime;
       
-      // Send to queue for MQTT publishing
-      xQueueSend(gpsDataQueue, &currentGpsData, 0);
-      
-      // Debug output
-      printGpsDebugInfo();
+      // Update shared GPS data with mutex protection
+      if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        // Update shared GPS data structure with latest values
+        updateGpsData(currentTime);
+        gpsDataUpdated = true;
+        
+        // Release mutex
+        xSemaphoreGive(displayMutex);
+        
+        // Signal other tasks that GPS data is updated
+        xSemaphoreGive(gpsDataSemaphore);
+        
+        // Debug output
+        printGpsDebugInfo();
+      }
     }
     
     // HTTP publishing (every 40 seconds)
@@ -68,14 +69,12 @@ void gpsTask(void *pvParameters) {
 }
 
 void updateGpsData(unsigned long timestamp) {
-  // Update GPS data structure with latest values
-  currentGpsData.timestamp = timestamp;
-  
   // Only update location if we have a valid GPS fix
   if (gps.location.isValid()) {
     currentGpsData.latitude = gps.location.lat();
     currentGpsData.longitude = gps.location.lng();
     currentGpsData.validFix = true;
+    currentGpsData.timestamp = timestamp;
     
     // Update additional data if available
     if (gps.altitude.isValid()) {
@@ -91,6 +90,7 @@ void updateGpsData(unsigned long timestamp) {
     }
   } else {
     currentGpsData.validFix = false;
+    currentGpsData.timestamp = timestamp;
   }
 }
 

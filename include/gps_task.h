@@ -1,8 +1,8 @@
 /**
- * ElderGuard - GPS Task
+ * ElderGuard - GPS Tracking Task
  * 
- * This file declares the GPS task interface for location tracking
- * using the GY-NEO6MV2 GPS module.
+ * This file contains the declarations for GPS tracking task
+ * using the NEO-6M GPS module.
  */
 
 #ifndef GPS_TASK_H
@@ -10,11 +10,12 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "globals.h"
 
 // Function prototypes
 void gpsTask(void *pvParameters);
 bool parseGpsData();
-void processGpsData();
+void initializeGps();
 void updateGpsData(unsigned long timestamp);
 void printGpsDebugInfo();
 

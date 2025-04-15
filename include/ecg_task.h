@@ -10,10 +10,18 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "globals.h"
+
+// Define ECG buffer size
+#define ECG_BUFFER_SIZE 250
 
 // Function prototypes
 void ecgTask(void *pvParameters);
 int calculateHeartRate(int *samples, int count);
 bool isValidEcgSignal();
+
+// External buffer declarations
+extern int ecgBuffer[];
+extern int bufferIndex;
 
 #endif // ECG_TASK_H

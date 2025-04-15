@@ -11,10 +11,7 @@
 #include <time.h>
 #include "../include/medication_task.h"
 #include "../include/config.h"
-
-// External queue handles declared in main.cpp
-extern QueueHandle_t medicationQueue;
-extern QueueHandle_t audioCommandQueue;
+#include "../include/globals.h"
 
 // Maximum number of medications to track
 #define MAX_MEDICATIONS 10
@@ -145,20 +142,45 @@ void checkMedications(struct tm *currentTime) {
 }
 
 void triggerMedicationReminder(const char* medicationName) {
-  // Create medication reminder structure
-  MedicationReminder reminder;
-  strncpy(reminder.name, medicationName, sizeof(reminder.name) - 1);
-  reminder.name[sizeof(reminder.name) - 1] = '\0'; // Ensure null termination
-  reminder.time = time(NULL);
-  reminder.taken = false;
-  
-  // Send to medication queue for display
-  xQueueSend(medicationQueue, &reminder, 0);
-  
-  // Trigger audio alert
-  AudioCommand audioCmd;
-  audioCmd.fileNumber = AUDIO_MEDICATION;
-  audioCmd.repeatCount = 5; // Repeat 5 times as per requirement
-  audioCmd.volume = 25;
-  xQueueSend(audioCommandQueue, &audioCmd, 0);
+  // Update shared medication reminder data with mutex protection
+  if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    // Create a local copy of the string first
+    char tempName[32];
+    strncpy(tempName, medicationName, sizeof(tempName) - 1);
+    tempName[sizeof(tempName) - 1] = '\0';  // Ensure null termination
+    
+    // Copy character by character to volatile destination
+    for (size_t i = 0; i < sizeof(currentMedicationReminder.name) - 1 && tempName[i] != '\0'; i++) {
+      currentMedicationReminder.name[i] = tempName[i];
+    }
+    currentMedicationReminder.name[sizeof(currentMedicationReminder.name) - 1] = '\0';
+    
+    currentMedicationReminder.time = time(NULL);
+    currentMedicationReminder.taken = false;
+    medicationReminderUpdated = true;
+    
+    // Release mutex
+    xSemaphoreGive(displayMutex);
+    
+    // Signal other tasks that medication reminder data is updated
+    xSemaphoreGive(medicationSemaphore);
+    
+    Serial.print("Medication Task: Reminder sent for ");
+    Serial.println(medicationName);
+    
+    // Trigger audio alert using global variables and semaphores
+    if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+      // Update audio command global data
+      currentAudioCommand.fileNumber = AUDIO_MEDICATION;
+      currentAudioCommand.repeatCount = 5; // Repeat 5 times as per requirement
+      currentAudioCommand.volume = 25;
+      audioCommandUpdated = true;
+      
+      // Release mutex
+      xSemaphoreGive(displayMutex);
+      
+      // Signal audio task
+      xSemaphoreGive(audioCommandSemaphore);
+    }
+  }
 }

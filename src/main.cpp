@@ -8,12 +8,12 @@
 #include <Arduino.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include <Wire.h>
 
 // Include all task headers
 #include "../include/config.h"
+#include "../include/globals.h"
 #include "../include/ecg_task.h"
 #include "../include/gps_task.h"
 #include "../include/fall_detection_task.h"
@@ -28,16 +28,6 @@ TaskHandle_t fallDetectionTaskHandle = NULL;
 TaskHandle_t screenTaskHandle = NULL;
 TaskHandle_t audioTaskHandle = NULL;
 TaskHandle_t medicationTaskHandle = NULL;
-
-// Shared data structures and queues
-QueueHandle_t ecgDataQueue;
-QueueHandle_t gpsDataQueue;
-QueueHandle_t fallDetectionQueue;
-QueueHandle_t medicationQueue;
-QueueHandle_t audioCommandQueue;
-
-// Mutex for shared resources
-SemaphoreHandle_t displayMutex;
 
 // Function declarations
 void initHardware();
@@ -56,13 +46,11 @@ void setup() {
   
   // Create mutexes and semaphores
   displayMutex = xSemaphoreCreateMutex();
-  
-  // Create queues for inter-task communication
-  ecgDataQueue = xQueueCreate(10, sizeof(EcgData));
-  gpsDataQueue = xQueueCreate(5, sizeof(GpsData));
-  fallDetectionQueue = xQueueCreate(3, sizeof(FallEvent));
-  medicationQueue = xQueueCreate(5, sizeof(MedicationReminder));
-  audioCommandQueue = xQueueCreate(5, sizeof(AudioCommand));
+  ecgDataSemaphore = xSemaphoreCreateBinary();
+  gpsDataSemaphore = xSemaphoreCreateBinary();
+  fallDetectionSemaphore = xSemaphoreCreateBinary();
+  medicationSemaphore = xSemaphoreCreateBinary();
+  audioCommandSemaphore = xSemaphoreCreateBinary();
   
   // Create tasks with appropriate priorities
   // Higher number means higher priority
@@ -81,7 +69,7 @@ void setup() {
     "ECG",                  // Name
     4096,                   // Stack size 
     NULL,                   // Parameters
-    4,                      // Priority (high - health monitoring)
+    5,                      // Priority (high - health monitoring)
     &ecgTaskHandle,         // Task handle
     1                       // Core
   );
@@ -91,7 +79,7 @@ void setup() {
     "GPS",                  // Name
     4096,                   // Stack size
     NULL,                   // Parameters
-    3,                      // Priority (medium)
+    5,                      // Priority (medium)
     &gpsTaskHandle,         // Task handle
     1                       // Core
   );
@@ -101,7 +89,7 @@ void setup() {
     "Screen",               // Name
     4096,                   // Stack size
     NULL,                   // Parameters
-    2,                      // Priority (lower)
+    5,                      // Priority (lower)
     &screenTaskHandle,      // Task handle
     1                       // Core
   );
@@ -111,7 +99,7 @@ void setup() {
     "Audio",                // Name
     4096,                   // Stack size
     NULL,                   // Parameters
-    3,                      // Priority (medium)
+    5,                      // Priority (medium)
     &audioTaskHandle,       // Task handle
     1                       // Core
   );
@@ -121,7 +109,7 @@ void setup() {
     "Medication",           // Name
     4096,                   // Stack size
     NULL,                   // Parameters
-    2,                      // Priority (lower)
+    5,                      // Priority (lower)
     &medicationTaskHandle,  // Task handle
     1                       // Core
   );

@@ -2,7 +2,7 @@
  * ElderGuard - Fall Detection Task Implementation
  * 
  * This file implements the fall detection task using the MPU6050 accelerometer.
- * It detects falls and sends alerts immediately through HTTP when a fall is detected.
+ * It detects falls and signals other tasks immediately through semaphores when a fall is detected.
  * This task has the highest priority in the system.
  */
 
@@ -14,10 +14,7 @@
 #include <Adafruit_Sensor.h>
 #include "../include/fall_detection_task.h"
 #include "../include/config.h"
-
-// External queue handle declared in main.cpp
-extern QueueHandle_t fallDetectionQueue;
-extern QueueHandle_t audioCommandQueue;
+#include "../include/globals.h"
 
 // MPU6050 sensor object
 Adafruit_MPU6050 mpu;
@@ -43,6 +40,14 @@ struct Orientation {
   float baselinePitch = 0.0;
   float baselineRoll = 0.0;
   float baselineYaw = 0.0;
+};
+
+// Fall state enum
+enum FallState {
+  MONITORING,
+  POTENTIAL_FALL,
+  IMPACT_DETECTED,
+  FALL_CONFIRMED
 };
 
 // Global variables
@@ -226,12 +231,17 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
           // Report fall event
           reportFallEvent(pitchChange, rollChange);
           
-          // Trigger audio alert
-          AudioCommand audioCmd;
-          audioCmd.fileNumber = AUDIO_FALL_DETECTED;
-          audioCmd.repeatCount = 3;
-          audioCmd.volume = 30; // Max volume
-          xQueueSend(audioCommandQueue, &audioCmd, 0);
+          // Trigger audio alert using global variables and semaphores
+          if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            currentAudioCommand.fileNumber = AUDIO_FALL_DETECTED;
+            currentAudioCommand.repeatCount = 3;
+            currentAudioCommand.volume = 30; // Max volume
+            audioCommandUpdated = true;
+            xSemaphoreGive(displayMutex);
+            
+            // Signal audio task
+            xSemaphoreGive(audioCommandSemaphore);
+          }
         } else {
           // No significant orientation change - likely not a fall
           currentState = MONITORING;
@@ -277,18 +287,24 @@ void reportFallEvent(float pitchChange, float rollChange) {
   Serial.print("Final orientation - Pitch: "); Serial.print(orientation.pitch);
   Serial.print(", Roll: "); Serial.println(orientation.roll);
   
-  // Create fall event structure
-  FallEvent fallEvent;
-  fallEvent.fallDetected = true;
-  fallEvent.acceleration = peakAcceleration;
-  fallEvent.orientation[0] = orientation.pitch;
-  fallEvent.orientation[1] = orientation.roll;
-  fallEvent.orientation[2] = orientation.yaw;
-  fallEvent.timestamp = millis();
-  fallEvent.fallSeverity = map(peakAcceleration, config.impactThreshold, 40.0, 1, 10);
-  
-  // Send fall event to queue
-  xQueueSend(fallDetectionQueue, &fallEvent, 0);
-  
-  Serial.println("Fall event sent to queue - Would send HTTP alert immediately");
+  // Update fall event global structure and signal other tasks
+  if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    // Update the global fall event data
+    currentFallEvent.fallDetected = true;
+    currentFallEvent.acceleration = peakAcceleration;
+    currentFallEvent.orientation[0] = orientation.pitch;
+    currentFallEvent.orientation[1] = orientation.roll;
+    currentFallEvent.orientation[2] = orientation.yaw;
+    currentFallEvent.timestamp = millis();
+    currentFallEvent.fallSeverity = map(peakAcceleration, config.impactThreshold, 40.0, 1, 10);
+    fallDetectionUpdated = true;
+    
+    // Release mutex
+    xSemaphoreGive(displayMutex);
+    
+    // Signal other tasks that fall event data is updated
+    xSemaphoreGive(fallDetectionSemaphore);
+    
+    Serial.println("Fall event signaled - Would send HTTP alert immediately");
+  }
 }

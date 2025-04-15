@@ -11,9 +11,7 @@
 #include <DFRobotDFPlayerMini.h>
 #include "../include/audio_task.h"
 #include "../include/config.h"
-
-// External queue handle declared in main.cpp
-extern QueueHandle_t audioCommandQueue;
+#include "../include/globals.h"
 
 // DFPlayer Mini object
 DFRobotDFPlayerMini mp3Player;
@@ -40,23 +38,42 @@ void audioTask(void *pvParameters) {
   
   // Main task loop
   while (true) {
-    // Check queue for audio commands
-    AudioCommand audioCmd;
-    if (xQueueReceive(audioCommandQueue, &audioCmd, pdMS_TO_TICKS(500)) == pdTRUE) {
-      if (mp3PlayerAvailable) {
-        playAudioFile(audioCmd.fileNumber, audioCmd.repeatCount);
+    // Check for audio commands using semaphore
+    if (xSemaphoreTake(audioCommandSemaphore, pdMS_TO_TICKS(500)) == pdTRUE) {
+      // Audio command was signaled - access the shared data
+      if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        // Get audio command data - create a local copy to avoid volatile issues
+        AudioCommand audioCmd;
+        audioCmd.fileNumber = currentAudioCommand.fileNumber;
+        audioCmd.repeatCount = currentAudioCommand.repeatCount;
+        audioCmd.volume = currentAudioCommand.volume;
         
-        // Set volume if specified
-        if (audioCmd.volume > 0) {
-          mp3Player.volume(audioCmd.volume);
+        bool audioUpdated = audioCommandUpdated;
+        audioCommandUpdated = false; // Reset the flag
+        
+        // Release mutex
+        xSemaphoreGive(displayMutex);
+        
+        // Process the audio command
+        if (audioUpdated && mp3PlayerAvailable) {
+          Serial.printf("Audio Task: Playing file #%d for %d times\n", 
+                     audioCmd.fileNumber, audioCmd.repeatCount);
+          
+          // Set volume if specified
+          if (audioCmd.volume > 0) {
+            mp3Player.volume(audioCmd.volume);
+          }
+          
+          // Play the sound
+          playAudioFile(audioCmd.fileNumber, audioCmd.repeatCount);
+        } else if (audioUpdated) {
+          // Fallback if MP3 player not available - just print to serial
+          Serial.print("Audio Task: Would play sound file ");
+          Serial.print(audioCmd.fileNumber);
+          Serial.print(" for ");
+          Serial.print(audioCmd.repeatCount);
+          Serial.println(" times");
         }
-      } else {
-        // Fallback if MP3 player not available - just print to serial
-        Serial.print("Audio Task: Would play sound file ");
-        Serial.print(audioCmd.fileNumber);
-        Serial.print(" for ");
-        Serial.print(audioCmd.repeatCount);
-        Serial.println(" times");
       }
     }
     

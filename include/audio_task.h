@@ -1,8 +1,8 @@
 /**
  * ElderGuard - Audio Task
  * 
- * This file declares the audio task interface for sound alerts
- * using the MP3-TF-16P module.
+ * This file contains the declarations for the audio notification task
+ * that manages MP3 audio alerts for the ElderGuard system.
  */
 
 #ifndef AUDIO_TASK_H
@@ -10,10 +10,12 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "globals.h"
 
 // Function prototypes
 void audioTask(void *pvParameters);
-void playAudioFile(int fileNumber, int repeatCount);
 bool initializeMP3Player();
+void playAudioFile(int fileNumber, int repeatCount);
+void stopAudio();
 
 #endif // AUDIO_TASK_H
