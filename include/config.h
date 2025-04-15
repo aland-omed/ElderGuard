@@ -45,11 +45,14 @@
 #define HTTP_PUBLISH_INTERVAL_MS 40000  // HTTP publishing every 40 seconds
 #define FALL_DETECTION_SAMPLE_RATE_HZ 50 // 50Hz sampling for accelerometer
 
+// Audio Settings
+#define AUDIO_MAX_VOLUME 30             // Maximum volume level (0-30)
+
 // Audio File Mappings (on SD card)
-#define AUDIO_WELCOME 1
-#define AUDIO_MEDICATION 2
-#define AUDIO_FALL_DETECTED 3
-#define AUDIO_EMERGENCY 4
+#define AUDIO_WELCOME 7
+#define AUDIO_MEDICATION 6
+#define AUDIO_FALL_DETECTED 2
+#define AUDIO_EMERGENCY 1
 
 // Data Structures
 // ------------------------------

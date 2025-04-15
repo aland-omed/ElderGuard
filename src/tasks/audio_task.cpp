@@ -25,7 +25,7 @@ void audioTask(void *pvParameters) {
   
   if (mp3PlayerAvailable) {
     // Make sure volume is set before playing anything
-    mp3Player.volume(25);
+    mp3Player.volume(AUDIO_MAX_VOLUME);
     vTaskDelay(pdMS_TO_TICKS(500));
     
     // Play welcome sound explicitly
@@ -59,10 +59,8 @@ void audioTask(void *pvParameters) {
           Serial.printf("Audio Task: Playing file #%d for %d times\n", 
                      audioCmd.fileNumber, audioCmd.repeatCount);
           
-          // Set volume if specified
-          if (audioCmd.volume > 0) {
-            mp3Player.volume(audioCmd.volume);
-          }
+          // Always use maximum volume
+          mp3Player.volume(AUDIO_MAX_VOLUME);
           
           // Play the sound
           playAudioFile(audioCmd.fileNumber, audioCmd.repeatCount);
@@ -100,7 +98,7 @@ bool initializeMP3Player() {
       
       // Configure module settings
       mp3Player.setTimeOut(1000);
-      mp3Player.volume(25); // Volume level (0-30)
+      mp3Player.volume(AUDIO_MAX_VOLUME); // Maximum volume level
       mp3Player.EQ(DFPLAYER_EQ_NORMAL);
       mp3Player.outputDevice(DFPLAYER_DEVICE_SD);
       vTaskDelay(pdMS_TO_TICKS(200));

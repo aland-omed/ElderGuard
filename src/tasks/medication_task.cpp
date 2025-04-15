@@ -173,7 +173,7 @@ void triggerMedicationReminder(const char* medicationName) {
       // Update audio command global data
       currentAudioCommand.fileNumber = AUDIO_MEDICATION;
       currentAudioCommand.repeatCount = 5; // Repeat 5 times as per requirement
-      currentAudioCommand.volume = 25;
+      currentAudioCommand.volume = AUDIO_MAX_VOLUME; // Use maximum volume
       audioCommandUpdated = true;
       
       // Release mutex
