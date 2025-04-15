@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <Wire.h>
+#include <WiFi.h>
 
 // Include all task headers
 #include "../include/config.h"
@@ -22,6 +23,7 @@
 #include "../include/medication_task.h"
 #include "../include/wifi_task.h"
 #include "../include/time_task.h"
+#include "../include/mqtt_task.h"
 
 // Task handles
 TaskHandle_t ecgTaskHandle = NULL;
@@ -32,6 +34,7 @@ TaskHandle_t audioTaskHandle = NULL;
 TaskHandle_t medicationTaskHandle = NULL;
 TaskHandle_t wifiTaskHandle = NULL;
 TaskHandle_t timeTaskHandle = NULL;
+TaskHandle_t mqttTaskHandle = NULL;
 
 // Function declarations
 void initHardware();
@@ -78,6 +81,17 @@ void setup() {
     9,                      // Priority (high - needed for timestamping)
     &timeTaskHandle,        // Task handle
     0                       // Core (0=Protocol core)
+  );
+  
+  // Create MQTT task for data publishing
+  xTaskCreatePinnedToCore(
+    mqttTask,               // Task function
+    "MQTT",                 // Name 
+    4096,                   // Stack size (bytes)
+    NULL,                   // Parameters
+    8,                      // Priority (high - needed for data publishing)
+    &mqttTaskHandle,        // Task handle
+    0                       // Core (0=Protocol core is better for network tasks)
   );
   
   // Create tasks with appropriate priorities
@@ -168,7 +182,9 @@ void loop() {
   // The main loop remains mostly empty as tasks handle all the work
   // Just add a small delay to prevent watchdog timer issues
   delay(1000);
-  
-  // Optional: Print task statistics periodically
-  // vTaskGetRunTimeStats()
+
+  // Optional: Monitor system health if WiFi is connected
+  if (WiFi.status() == WL_CONNECTED) {
+    // We don't need to call mqttClient.loop() here, as it's handled in the MQTT task
+  }
 }

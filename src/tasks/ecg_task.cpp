@@ -13,6 +13,7 @@
 #include "../include/ecg_task.h"
 #include "../include/config.h"
 #include "../include/globals.h"
+#include "../include/mqtt_task.h"
 
 // Constants for ECG processing
 #define ECG_BUFFER_SIZE 250              // 5 seconds at 50Hz
@@ -281,6 +282,9 @@ void ecgTask(void *pvParameters) {
         
         // Signal other tasks that ECG data is updated
         xSemaphoreGive(ecgDataSemaphore);
+        
+        // Publish ECG data to MQTT
+        publishEcgData(rawEcgValue, heartRate, (heartRate > 0));
         
         // Debug output every 5 seconds
         static unsigned long lastDebugOutput = 0;

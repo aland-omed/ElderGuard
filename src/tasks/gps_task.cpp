@@ -12,6 +12,7 @@
 #include "../include/gps_task.h"
 #include "../include/config.h"
 #include "../include/globals.h"
+#include "../include/mqtt_task.h"
 
 // TinyGPS++ object
 TinyGPSPlus gps;
@@ -48,6 +49,11 @@ void gpsTask(void *pvParameters) {
         
         // Signal other tasks that GPS data is updated
         xSemaphoreGive(gpsDataSemaphore);
+        
+        // Publish GPS data to MQTT if we have a valid fix
+        if (currentGpsData.validFix) {
+          publishGpsData(currentGpsData.latitude, currentGpsData.longitude);
+        }
         
         // Debug output
         printGpsDebugInfo();
