@@ -24,6 +24,7 @@
 #include "../include/wifi_task.h"
 #include "../include/time_task.h"
 #include "../include/mqtt_task.h"
+#include "../include/http_task.h"
 
 // Task handles
 TaskHandle_t ecgTaskHandle = NULL;
@@ -35,6 +36,7 @@ TaskHandle_t medicationTaskHandle = NULL;
 TaskHandle_t wifiTaskHandle = NULL;
 TaskHandle_t timeTaskHandle = NULL;
 TaskHandle_t mqttTaskHandle = NULL;
+TaskHandle_t httpTaskHandle = NULL;
 
 // Function declarations
 void initHardware();
@@ -61,16 +63,23 @@ void setup() {
   wifiStatusSemaphore = xSemaphoreCreateBinary();
   timeStatusSemaphore = xSemaphoreCreateBinary();
   
+  // Configure Watchdog timer for the entire system (optional)
+  // esp_task_wdt_init(30, false); // 30 second timeout, no panic
+  
+  // ===== CORE 0 TASKS (Network & Communication) =====
   // Create WiFi task first to establish connectivity
   xTaskCreatePinnedToCore(
     wifiTask,               // Task function
     "WiFi",                 // Name 
-    4096,                   // Stack size (bytes)
+    8192,                   // Stack size (bytes) - INCREASED from 4096
     NULL,                   // Parameters
     10,                     // Priority (very high - needed for other services)
     &wifiTaskHandle,        // Task handle
     0                       // Core (0=Protocol core is better for network tasks)
   );
+  
+  // Give WiFi task time to initialize before starting other network tasks
+  vTaskDelay(500 / portTICK_PERIOD_MS);
   
   // Create time task next to ensure time synchronization
   xTaskCreatePinnedToCore(
@@ -87,13 +96,25 @@ void setup() {
   xTaskCreatePinnedToCore(
     mqttTask,               // Task function
     "MQTT",                 // Name 
-    4096,                   // Stack size (bytes)
+    8192,                   // Stack size (bytes) - INCREASED from 4096
     NULL,                   // Parameters
-    8,                      // Priority (high - needed for data publishing)
+    7,                      // Priority (adjusted down slightly)
     &mqttTaskHandle,        // Task handle
     0                       // Core (0=Protocol core is better for network tasks)
   );
+
+  // Create HTTP task for data uploading to Laravel and Telegram alerts
+  xTaskCreatePinnedToCore(
+    httpTask,               // Task function
+    "HTTP",                 // Name 
+    8192,                   // Stack size (bytes) - same as before
+    NULL,                   // Parameters
+    6,                      // Priority (adjusted down slightly)
+    &httpTaskHandle,        // Task handle
+    0                       // Core (0=Protocol core is better for network tasks)
+  );
   
+  // ===== CORE 1 TASKS (Sensors & User Interface) =====
   // Create tasks with appropriate priorities
   // Higher number means higher priority
   xTaskCreatePinnedToCore(

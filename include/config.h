@@ -42,7 +42,7 @@
 #define ECG_SAMPLE_FREQUENCY_HZ 50     // 50Hz sampling rate for ECG
 #define GPS_UPDATE_INTERVAL_MS 1000     // GPS update every 1 second
 #define MQTT_PUBLISH_INTERVAL_MS 1000   // MQTT publishing every 1 second
-#define HTTP_PUBLISH_INTERVAL_MS 40000  // HTTP publishing every 40 seconds
+#define HTTP_PUBLISH_INTERVAL_MS 30000  // HTTP publishing every 30 seconds
 #define FALL_DETECTION_SAMPLE_RATE_HZ 50 // 50Hz sampling for accelerometer
 
 // Audio Settings
