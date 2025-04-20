@@ -28,7 +28,7 @@ const char* ALERT_ENDPOINT = "/alerts";
 
 // Device identification
 const char* DEVICE_ID = "ELDERGUARD_001"; // Should match a device_id in your devices table
-int PATIENT_ID = 1; // Should match the patient_id in your patients table
+// Using PATIENT_ID from config.h instead of defining it here
 
 // Variables to track last send time
 unsigned long lastSensorDataSend = 0;

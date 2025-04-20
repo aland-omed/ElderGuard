@@ -34,9 +34,18 @@ extern volatile bool gpsDataUpdated;
 extern volatile FallEvent currentFallEvent;
 extern volatile bool fallDetectionUpdated;
 
+// Upcoming Medication Information
+typedef struct {
+    char name[32];         // Medication name
+    char timeStr[6];       // Time string (HH:MM)
+    bool available;        // Whether there is an upcoming medication
+} UpcomingMedication;
+
 // Shared Medication Data
 extern volatile MedicationReminder currentMedicationReminder;
 extern volatile bool medicationReminderUpdated;
+extern volatile UpcomingMedication upcomingMedication;
+extern volatile bool upcomingMedicationUpdated;
 
 // Shared Audio Command Data
 extern volatile AudioCommand currentAudioCommand;

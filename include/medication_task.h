@@ -1,7 +1,7 @@
 /**
  * ElderGuard - Medication Reminder Task
  * 
- * This file contains the declarations for the medication reminder task
+ * This file contains declarations for the medication reminder task
  * that manages scheduled medications for the ElderGuard system.
  */
 
@@ -15,8 +15,9 @@
 
 // Function prototypes
 void medicationTask(void *pvParameters);
-void checkMedications(struct tm *currentTime);
 void triggerMedicationReminder(const char* medicationName);
-void confirmMedicationTaken(int medicationIndex);
+void triggerMedicationAdvanceReminder(const char* medicationName);
+void updateUpcomingMedicationDisplay();
+void playMedicationSound(const char* medicationName, bool isAdvance);
 
 #endif // MEDICATION_TASK_H

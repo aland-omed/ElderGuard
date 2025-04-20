@@ -54,6 +54,22 @@
 #define AUDIO_FALL_DETECTED 2
 #define AUDIO_EMERGENCY 1
 
+// API Configuration
+// ------------------------------
+#define PATIENT_ID 1                          // Patient identifier for API communication
+#define MAX_MEDICATIONS 20                    // Maximum number of medications to track
+#define MEDICATION_FETCH_INTERVAL_MS 900000   // Fetch medication schedule every 15 minutes (900000ms)
+#define MEDICATION_API_URL "http://your-laravel-url.com/api/medications" // API endpoint for medication schedules
+
+// Medication Task Constants
+#define API_CHECK_INTERVAL 900000            // 15 minutes in milliseconds
+#define TIME_CHECK_INTERVAL 10000            // 10 seconds in milliseconds
+#define HTTP_TIMEOUT 10000                   // 10 seconds HTTP request timeout
+#define MAX_RESPONSE_SIZE 8192               // Maximum API response size in bytes
+#define MAX_JSON_DOC_SIZE 2048               // Size for JSON documents
+#define MIN_SPIFFS_SPACE 4096                // Minimum required space in SPIFFS before cleaning
+#define AUDIO_REPEAT_COUNT 5                 // Number of times to repeat medication audio alert
+
 // WiFi and Time Management Constants
 // ------------------------------
 #define WIFI_SSID "AVIV"        // Default SSID
@@ -105,6 +121,7 @@ typedef struct {
     char name[32];         // Medication name
     unsigned long time;    // Scheduled time (epoch)
     bool taken;            // Whether medication was taken
+    bool isAdvanceNotice;  // Whether this is a 1-minute advance notice
 } MedicationReminder;
 
 // Audio Command

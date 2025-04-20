@@ -32,6 +32,8 @@ volatile bool fallDetectionUpdated = false;
 // Shared Medication Data
 volatile MedicationReminder currentMedicationReminder;
 volatile bool medicationReminderUpdated = false;
+volatile UpcomingMedication upcomingMedication;
+volatile bool upcomingMedicationUpdated = false;
 
 // Shared Audio Command Data
 volatile AudioCommand currentAudioCommand;
