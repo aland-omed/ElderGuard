@@ -25,6 +25,7 @@
 #include "../include/time_task.h"
 #include "../include/mqtt_task.h"
 #include "../include/http_task.h"
+#include "../include/firmware_update_task.h"
 
 // Task handles
 TaskHandle_t ecgTaskHandle = NULL;
@@ -37,6 +38,7 @@ TaskHandle_t wifiTaskHandle = NULL;
 TaskHandle_t timeTaskHandle = NULL;
 TaskHandle_t mqttTaskHandle = NULL;
 TaskHandle_t httpTaskHandle = NULL;
+TaskHandle_t firmwareUpdateTaskHandle = NULL;
 
 // Function declarations
 void initHardware();
@@ -111,6 +113,20 @@ void setup() {
     &httpTaskHandle,        // Task handle
     0                       // Core (0=Protocol core)
   );
+  
+  // Firmware update task is temporarily disabled
+  /*
+  // Create firmware update task (lowest priority on core 0)
+  xTaskCreatePinnedToCore(
+    firmwareUpdateTask,     // Task function
+    "FirmwareUpdate",       // Name 
+    8192,                   // Stack size (bytes) - needs more for OTA update
+    NULL,                   // Parameters
+    3,                      // Priority (low, as it's not time-critical)
+    &firmwareUpdateTaskHandle, // Task handle
+    0                       // Core (0=Protocol core)
+  );
+  */
   
   // ===== CORE 1 TASKS (Sensors & User Interface) =====
   
