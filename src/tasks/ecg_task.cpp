@@ -10,10 +10,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/adc.h"
+#include "esp_adc_cal.h" // Added ESP ADC calibration header
 #include "../include/ecg_task.h"
 #include "../include/config.h"
 #include "../include/globals.h"
 #include "../include/mqtt_task.h"
+#include "../include/http_task.h"  // Added for sendTelegramMessage function
 
 // Constants for ECG processing
 #define ECG_BUFFER_SIZE 250              // 5 seconds at 50Hz
@@ -26,6 +28,11 @@
 #define QRS_MIN_WIDTH 10                 // Minimum width of QRS complex in ms
 #define QRS_MAX_WIDTH 150                // Maximum width of QRS complex in ms
 #define LEARNING_FACTOR 0.2              // For adaptive threshold
+
+// Heart rate drop detection parameters
+#define HEART_RATE_DROP_THRESHOLD 20     // Consider drop of 20 BPM or more as significant
+#define HEART_RATE_MIN_VALID 40          // Minimum valid heart rate
+#define HEART_RATE_ALERT_COOLDOWN 60000  // Cooldown period between alerts (60 seconds)
 
 // Make buffer and index accessible to other files
 int ecgBuffer[ECG_BUFFER_SIZE];
@@ -48,10 +55,16 @@ int rrIndex = 0;
 bool leadsConnected = false;
 unsigned long lastHeartRateChangeTime = 0;
 
+// Heart rate drop detection variables
+int previousStableHeartRate = 0;
+unsigned long lastHeartRateDropAlertTime = 0;
+bool heartRateDropDetected = false;
+
 void ecgTask(void *pvParameters) {
   // Setup ADC for ECG input
   adc1_config_width(ADC_WIDTH_BIT_12);                   // 12-bit resolution (0-4095)
-  adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11); // Adjusted for typical AD8232 output
+  // Use enum value directly instead of named constant to avoid deprecation warnings
+  adc1_config_channel_atten(ADC1_CHANNEL_0, (adc_atten_t)3); // 11dB attenuation (0-3.9V)
   
   // Configure lead-off detection pins if used
   pinMode(ECG_LO_POS_PIN, INPUT);
@@ -67,6 +80,7 @@ void ecgTask(void *pvParameters) {
   // Variables for data publishing
   unsigned long lastDataUpdate = 0;
   unsigned long lastValidSignalTime = 0;
+  unsigned long stableHeartRateTime = 0;
   
   // Initialize RR intervals
   for (int i = 0; i < RR_BUFFER_SIZE; i++) {
@@ -108,6 +122,7 @@ void ecgTask(void *pvParameters) {
       if (heartRate != 0) {
         Serial.println("ECG Task: Leads disconnected, resetting heart rate");
         heartRate = 0;
+        previousStableHeartRate = 0; // Reset stable heart rate when leads disconnected
       }
       // Skip further processing
       
@@ -235,6 +250,62 @@ void ecgTask(void *pvParameters) {
                 lastValidHeartRate = heartRate;
                 lastHeartRateChangeTime = currentTime;
                 
+                // Track stable heart rate for drop detection
+                if (heartRate >= HEART_RATE_MIN_VALID) {
+                  if (previousStableHeartRate == 0) {
+                    // First valid reading, initialize stable heart rate
+                    previousStableHeartRate = heartRate;
+                    stableHeartRateTime = currentTime;
+                  } else if (currentTime - stableHeartRateTime > 10000) {
+                    // After 10 seconds of stable readings, update the stable heart rate
+                    previousStableHeartRate = heartRate;
+                  }
+                  
+                  // Heart rate drop detection
+                  if (previousStableHeartRate > 0 && 
+                      heartRate < (previousStableHeartRate - HEART_RATE_DROP_THRESHOLD) &&
+                      currentTime - lastHeartRateDropAlertTime > HEART_RATE_ALERT_COOLDOWN) {
+                      
+                    // Significant heart rate drop detected
+                    Serial.printf("ECG Task: ⚠️ HEART RATE DROP DETECTED! From %d to %d BPM\n", 
+                                  previousStableHeartRate, heartRate);
+                    
+                    // Send Telegram alert with location info if available
+                    char telegramMsg[256];
+                    
+                    if (gpsDataUpdated && currentGpsData.latitude != 0 && currentGpsData.longitude != 0) {
+                      // Create Google Maps link with the GPS coordinates
+                      char locationLink[128];
+                      snprintf(locationLink, sizeof(locationLink), 
+                              "https://maps.google.com/maps?q=%.6f,%.6f", 
+                              currentGpsData.latitude, currentGpsData.longitude);
+                      
+                      // Create the full message with location
+                      snprintf(telegramMsg, sizeof(telegramMsg), 
+                              "⚠️ HEART RATE DROP DETECTED! ⚠️\nPrevious: %d BPM\nCurrent: %d BPM\nDrop: %d BPM\nLocation: %s", 
+                              previousStableHeartRate, heartRate, 
+                              previousStableHeartRate - heartRate, locationLink);
+                    } else {
+                      // Create message without location
+                      snprintf(telegramMsg, sizeof(telegramMsg), 
+                              "⚠️ HEART RATE DROP DETECTED! ⚠️\nPrevious: %d BPM\nCurrent: %d BPM\nDrop: %d BPM\nLocation: No GPS signal available", 
+                              previousStableHeartRate, heartRate, 
+                              previousStableHeartRate - heartRate);
+                    }
+                    
+                    // Send the message
+                    sendTelegramMessage(telegramMsg);
+                    
+                    // Update last alert time
+                    lastHeartRateDropAlertTime = currentTime;
+                    heartRateDropDetected = true;
+                    
+                    // After detecting drop, reset the stable heart rate to adapt to new conditions
+                    previousStableHeartRate = heartRate;
+                    stableHeartRateTime = currentTime;
+                  }
+                }
+                
                 // Debug output only when heart rate changes significantly
                 static int lastReportedHR = 0;
                 if (abs(heartRate - lastReportedHR) >= 3) {
@@ -283,8 +354,8 @@ void ecgTask(void *pvParameters) {
         // Signal other tasks that ECG data is updated
         xSemaphoreGive(ecgDataSemaphore);
         
-        // Publish ECG data to MQTT
-        publishEcgData(rawEcgValue, heartRate, (heartRate > 0));
+        // Publish ECG data to MQTT - explicitly call with no parameters
+        publishEcgData();
         
         // Debug output every 5 seconds
         static unsigned long lastDebugOutput = 0;

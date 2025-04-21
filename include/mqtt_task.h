@@ -1,21 +1,22 @@
 /**
- * ElderGuard - MQTT Task
+ * ElderGuard - MQTT Task Header
  * 
- * Handles MQTT connectivity and data publishing for the ElderGuard system
+ * Defines the MQTT task and related functions for sending telemetry
+ * data to the cloud.
  */
 
 #ifndef MQTT_TASK_H
 #define MQTT_TASK_H
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include <Arduino.h>
 
-// Function declarations
+// Function prototypes
 void mqttTask(void *pvParameters);
-void publishEcgData(int rawValue, int heartRate, bool validSignal);
-void publishGpsData(float latitude, float longitude);
 void setupMqtt();
-void reconnectMqtt();
+bool connectMqtt();
+void publishStatusUpdate(bool forceUpdate);
+void publishEcgData();
+void publishGpsData();
+void publishFallData();
 
 #endif // MQTT_TASK_H

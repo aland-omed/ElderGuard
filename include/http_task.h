@@ -19,5 +19,6 @@ void httpTask(void *pvParameters);
 void sendSensorData();
 void sendHeartRateAlert(int heartRate);
 void sendLocationData();
+void sendTelegramMessage(const char* message);  // Added declaration for Telegram function
 
 #endif // HTTP_TASK_H

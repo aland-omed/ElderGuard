@@ -15,6 +15,7 @@
 #include "../include/fall_detection_task.h"
 #include "../include/config.h"
 #include "../include/globals.h"
+#include "../include/http_task.h"  // Added for sendTelegramMessage function
 
 // MPU6050 sensor object
 Adafruit_MPU6050 mpu;
@@ -339,7 +340,7 @@ void reportFallEvent(float pitchChange, float rollChange) {
   Serial.println();
   
   // Report fall metrics
-  Serial.print("Peak acceleration: "); Serial.print(peakAcceleration); Serial.println(" m/s²");
+  Serial.print("Peak acceleration: "); Serial.print(peakAcceleration); Serial.print(" m/s²");
   Serial.print("Min acceleration: "); Serial.print(minAcceleration); Serial.println(" m/s²");
   
   // Orientation after fall
@@ -358,8 +359,6 @@ void reportFallEvent(float pitchChange, float rollChange) {
     currentFallEvent.fallSeverity = map(peakAcceleration, config.impactThreshold, 40.0, 1, 10);
     fallDetectionUpdated = true;
     
-    // Removed display update flag as we only need sound alerts
-    
     // Release mutex
     xSemaphoreGive(displayMutex);
     
@@ -367,5 +366,29 @@ void reportFallEvent(float pitchChange, float rollChange) {
     xSemaphoreGive(fallDetectionSemaphore);
     
     Serial.println("Fall event signaled - Would send HTTP alert immediately");
+    
+    // Send Telegram message with location information if available
+    char telegramMsg[256];
+    
+    if (gpsDataUpdated && currentGpsData.latitude != 0 && currentGpsData.longitude != 0) {
+      // Create Google Maps link with the GPS coordinates
+      char locationLink[128];
+      snprintf(locationLink, sizeof(locationLink), 
+              "https://maps.google.com/maps?q=%.6f,%.6f", 
+              currentGpsData.latitude, currentGpsData.longitude);
+      
+      // Create the full message with location
+      snprintf(telegramMsg, sizeof(telegramMsg), 
+              "⚠️ FALL DETECTED! ⚠️\nSeverity: %d/10\nLocation: %s", 
+              currentFallEvent.fallSeverity, locationLink);
+    } else {
+      // Create message without location
+      snprintf(telegramMsg, sizeof(telegramMsg), 
+              "⚠️ FALL DETECTED! ⚠️\nSeverity: %d/10\nLocation: No GPS signal available", 
+              currentFallEvent.fallSeverity);
+    }
+    
+    // Send the message using the function we added to mqtt_task
+    sendTelegramMessage(telegramMsg);
   }
 }

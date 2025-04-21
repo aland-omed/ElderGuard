@@ -467,7 +467,7 @@ void triggerMedicationReminder(const char* medicationName) {
     xSemaphoreGive(medicationSemaphore);
     
     
-    Serial.printf("Medication Task: Reminder for %s\n", medicationName);
+    Serial.printf("Medication Task: Reminder for %s (Telegram alert triggered)\n", medicationName);
     
     // Play audio alert
     playMedicationSound(medicationName, false);

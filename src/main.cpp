@@ -44,9 +44,7 @@ void initHardware();
 void setup() {
   // Initialize Serial for debugging
   Serial.begin(115200);
-  while (!Serial) {
-    ; // Wait for serial port to connect
-  }
+  delay(500); // Short delay to let serial initialize
   
   Serial.println("\n\n===== ElderGuard System Initializing =====");
   
@@ -63,17 +61,17 @@ void setup() {
   wifiStatusSemaphore = xSemaphoreCreateBinary();
   timeStatusSemaphore = xSemaphoreCreateBinary();
   
-  // Configure Watchdog timer for the entire system (optional)
-  // esp_task_wdt_init(30, false); // 30 second timeout, no panic
+  // Do NOT configure Watchdog timer as requested by the user
   
   // ===== CORE 0 TASKS (Network & Communication) =====
-  // Create WiFi task first to establish connectivity
+  
+  // Create WiFi task first to establish connectivity - HIGHEST PRIORITY ON CORE 0
   xTaskCreatePinnedToCore(
     wifiTask,               // Task function
     "WiFi",                 // Name 
-    8192,                   // Stack size (bytes) - INCREASED from 4096
+    8192,                   // Stack size (bytes)
     NULL,                   // Parameters
-    10,                     // Priority (very high - needed for other services)
+    10,                     // Priority (highest on core 0)
     &wifiTaskHandle,        // Task handle
     0                       // Core (0=Protocol core is better for network tasks)
   );
@@ -87,7 +85,7 @@ void setup() {
     "Time",                 // Name 
     4096,                   // Stack size (bytes)
     NULL,                   // Parameters
-    9,                      // Priority (high - needed for timestamping)
+    8,                      // Priority (high)
     &timeTaskHandle,        // Task handle
     0                       // Core (0=Protocol core)
   );
@@ -96,85 +94,90 @@ void setup() {
   xTaskCreatePinnedToCore(
     mqttTask,               // Task function
     "MQTT",                 // Name 
-    8192,                   // Stack size (bytes) - INCREASED from 4096
+    8192,                   // Stack size (bytes)
     NULL,                   // Parameters
-    7,                      // Priority (adjusted down slightly)
+    6,                      // Priority (medium-high)
     &mqttTaskHandle,        // Task handle
-    0                       // Core (0=Protocol core is better for network tasks)
+    0                       // Core (0=Protocol core)
   );
 
-  // Create HTTP task for data uploading to Laravel and Telegram alerts
+  // Create HTTP task for data uploading to server
   xTaskCreatePinnedToCore(
     httpTask,               // Task function
     "HTTP",                 // Name 
-    8192,                   // Stack size (bytes) - same as before
+    8192,                   // Stack size (bytes)
     NULL,                   // Parameters
-    6,                      // Priority (adjusted down slightly)
+    4,                      // Priority (medium)
     &httpTaskHandle,        // Task handle
-    0                       // Core (0=Protocol core is better for network tasks)
+    0                       // Core (0=Protocol core)
   );
   
   // ===== CORE 1 TASKS (Sensors & User Interface) =====
-  // Create tasks with appropriate priorities
-  // Higher number means higher priority
+  
+  // Fall detection task has the highest priority as it's safety-critical
   xTaskCreatePinnedToCore(
     fallDetectionTask,      // Task function
     "FallDetection",        // Name 
     4096,                   // Stack size (bytes)
     NULL,                   // Parameters
-    5,                      // Priority (highest - critical response)
+    10,                     // Priority (highest on core 1)
     &fallDetectionTaskHandle, // Task handle
     1                       // Core (1=Application core)
   );
   
+  // ECG task has high priority for heart rate monitoring
   xTaskCreatePinnedToCore(
     ecgTask,                // Task function
     "ECG",                  // Name
     4096,                   // Stack size 
     NULL,                   // Parameters
-    5,                      // Priority (high - health monitoring)
+    9,                      // Priority (very high)
     &ecgTaskHandle,         // Task handle
-    1                       // Core
+    1                       // Core (1=Application core)
   );
   
+  // GPS task has high priority for location services
   xTaskCreatePinnedToCore(
     gpsTask,                // Task function
     "GPS",                  // Name
     4096,                   // Stack size
     NULL,                   // Parameters
-    5,                      // Priority (medium)
+    8,                      // Priority (high)
     &gpsTaskHandle,         // Task handle
-    1                       // Core
+    1                       // Core (1=Application core)
   );
   
-  xTaskCreatePinnedToCore(
-    screenTask,             // Task function
-    "Screen",               // Name
-    4096,                   // Stack size
-    NULL,                   // Parameters
-    5,                      // Priority (lower)
-    &screenTaskHandle,      // Task handle
-    1                       // Core
-  );
-  
+  // Audio task for alerts
   xTaskCreatePinnedToCore(
     audioTask,              // Task function
     "Audio",                // Name
     4096,                   // Stack size
     NULL,                   // Parameters
-    5,                      // Priority (medium)
+    7,                      // Priority (medium-high)
     &audioTaskHandle,       // Task handle
-    1                       // Core
+    1                       // Core (1=Application core)
   );
   
+  // Screen task for display updates
+  xTaskCreatePinnedToCore(
+    screenTask,             // Task function
+    "Screen",               // Name
+    4096,                   // Stack size
+    NULL,                   // Parameters
+    5,                      // Priority (medium)
+    &screenTaskHandle,      // Task handle
+    1                       // Core (1=Application core)
+  );
+  
+  // Medication task for reminders
   xTaskCreatePinnedToCore(
     medicationTask,         // Task function
     "Medication",           // Name
     4096,                   // Stack size
     NULL,                   // Parameters
-    5,                      // Priority (lower)
+    4,                      // Priority (medium-low)
     &medicationTaskHandle,  // Task handle
-    1                       // Core
+    1                       // Core (1=Application core)
   );
   
   Serial.println("All tasks started successfully");
@@ -203,9 +206,4 @@ void loop() {
   // The main loop remains mostly empty as tasks handle all the work
   // Just add a small delay to prevent watchdog timer issues
   delay(1000);
-
-  // Optional: Monitor system health if WiFi is connected
-  if (WiFi.status() == WL_CONNECTED) {
-    // We don't need to call mqttClient.loop() here, as it's handled in the MQTT task
-  }
 }

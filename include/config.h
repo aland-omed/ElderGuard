@@ -59,7 +59,7 @@
 #define PATIENT_ID 1                          // Patient identifier for API communication
 #define MAX_MEDICATIONS 20                    // Maximum number of medications to track
 #define MEDICATION_FETCH_INTERVAL_MS 900000   // Fetch medication schedule every 15 minutes (900000ms)
-#define MEDICATION_API_URL "http://your-laravel-url.com/api/medications" // API endpoint for medication schedules
+#define MEDICATION_API_URL "https://elderguard.codecommerce.info/api/medications" // API endpoint for medication schedules
 
 // Medication Task Constants
 #define API_CHECK_INTERVAL 900000            // 15 minutes in milliseconds
@@ -72,8 +72,8 @@
 
 // WiFi and Time Management Constants
 // ------------------------------
-#define WIFI_SSID "AVIV"        // Default SSID
-#define WIFI_PASSWORD "$$$$$$$$M"      // Default password
+#define WIFI_SSID "Company 2.4"        // Default SSID
+#define WIFI_PASSWORD "Halist2004"      // Default password
 #define WIFI_CONNECT_TIMEOUT_MS 30000         // WiFi connection timeout (30 sec)
 #define WIFI_RECONNECT_INTERVAL_MS 60000      // Attempt reconnection every minute
 #define WIFI_TASK_INTERVAL_MS 5000            // Check WiFi status every 5 seconds

@@ -16,13 +16,22 @@
 #include "../include/globals.h"
 #include "../include/wifi_task.h"
 
+// HTTP server settings
+const char* cloud_server = "https://elderguard-cloud.example.com/api";
+const char* api_key = "elderguard-api-key-12345";
+
+// Telegram Bot settings
+const char* TELEGRAM_BOT_TOKEN = "7250747996:AAGZ_luXdgcnZls1QddK5z2UQ2TUVzjvgzY";
+const char* TELEGRAM_CHAT_ID = "6069199442";
+const char* TELEGRAM_API_URL = "https://api.telegram.org/bot";
+
 // HTTP request settings
 #define HTTP_MAX_RETRIES 3
 #define HTTP_RETRY_DELAY_MS 2000
 #define HTTP_PUBLISH_INTERVAL_MS 30000 // 30 seconds between data uploads
 
 // Laravel API endpoints
-const char* LARAVEL_API_URL = "http://your-laravel-url.com/api"; // Replace with your actual Laravel URL
+const char* LARAVEL_API_URL = "https://elderguard.codecommerce.info/api"; // Replace with your actual Laravel URL
 const char* SENSOR_DATA_ENDPOINT = "/sensor-data";
 const char* ALERT_ENDPOINT = "/alerts";
 
@@ -263,4 +272,51 @@ void sendLocationData() {
     
     xSemaphoreGive(gpsDataSemaphore);
   }
+}
+
+/**
+ * Send message via Telegram Bot API
+ * 
+ * @param message The message to send
+ */
+void sendTelegramMessage(const char* message) {
+  // Check if WiFi is connected
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected. Cannot send Telegram message.");
+    return;
+  }
+
+  Serial.print("Sending Telegram message: ");
+  Serial.println(message);
+  
+  HTTPClient http;
+  
+  // Construct the complete URL
+  String url = String(TELEGRAM_API_URL) + TELEGRAM_BOT_TOKEN + "/sendMessage";
+  
+  // Start the HTTP POST request
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  
+  // Create the JSON payload
+  String payload = "{\"chat_id\":\"" + String(TELEGRAM_CHAT_ID) + "\",\"text\":\"" + message + "\"}";
+  
+  // Send the request and get the response code
+  int httpResponseCode = http.POST(payload);
+  
+  if (httpResponseCode > 0) {
+    String response = http.getString();
+    Serial.print("Telegram API Response: ");
+    Serial.println(httpResponseCode);
+    Serial.println(response);
+  } else {
+    Serial.print("Telegram API Error: ");
+    Serial.println(httpResponseCode);
+  }
+  
+  // Close connection
+  http.end();
+  
+  // Brief delay to avoid hammering the API
+  vTaskDelay(pdMS_TO_TICKS(100));
 }

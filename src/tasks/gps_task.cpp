@@ -50,10 +50,8 @@ void gpsTask(void *pvParameters) {
         // Signal other tasks that GPS data is updated
         xSemaphoreGive(gpsDataSemaphore);
         
-        // Publish GPS data to MQTT if we have a valid fix
-        if (currentGpsData.validFix) {
-          publishGpsData(currentGpsData.latitude, currentGpsData.longitude);
-        }
+        // Publish GPS data if MQTT is available
+        publishGpsData();
         
         // Debug output
         printGpsDebugInfo();
