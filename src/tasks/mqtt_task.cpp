@@ -2,12 +2,14 @@
  * ElderGuard - MQTT Task Implementation
  * 
  * Handles MQTT connectivity and data publishing for the ElderGuard system
+ * Designed for cooperative multitasking to avoid watchdog timer issues
  */
 
 #include "../include/mqtt_task.h"
 #include "../include/config.h"
 #include "../include/globals.h"
 #include "../include/wifi_task.h"
+#include "../include/ecg_task.h" 
 #include <PubSubClient.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
@@ -37,18 +39,28 @@ const unsigned long STATUS_UPDATE_INTERVAL = 30000; // 30 seconds
 unsigned long lastConnectAttempt = 0;
 const unsigned long CONNECT_RETRY_INTERVAL = 5000; // 5 seconds between retries
 
-// Debug flag - set to true for verbose output
-bool mqtt_debug = true;
+// Debug flag - set to false to disable verbose output
+bool mqtt_debug = false;
+
+// Data update intervals (1 second as requested)
+const unsigned long DATA_UPDATE_INTERVAL = 1000; 
+unsigned long lastEcgUpdate = 0;
+unsigned long lastGpsUpdate = 0;
+unsigned long lastFallUpdate = 0;
 
 // Forward declarations
-void publishStatusUpdate(bool forceUpdate);
+bool connectMqttNonBlocking();
+bool publishStatusUpdateNonBlocking(bool forceUpdate);
+bool publishEcgDataNonBlocking();
+bool publishGpsDataNonBlocking();
+bool publishFallDataNonBlocking();
 
 /**
  * Initialize MQTT client and settings
  */
 void setupMqtt() {
   mqttClient.setServer(mqtt_server, mqtt_port);
-  espClient.setTimeout(5000); // 5 second timeout
+  espClient.setTimeout(2000); // Short timeout to prevent blocking
   mqttClient.setBufferSize(512);
   
   if (mqtt_debug) {
@@ -60,11 +72,12 @@ void setupMqtt() {
 }
 
 /**
- * Connect attempt with timeout to prevent hanging
+ * Non-blocking MQTT connection attempt
  */
-bool connectMqtt() {
-  // Check connection timing
+bool connectMqttNonBlocking() {
   unsigned long currentMillis = millis();
+  
+  // Only retry after interval
   if (currentMillis - lastConnectAttempt < CONNECT_RETRY_INTERVAL) {
     return mqttClient.connected();
   }
@@ -76,15 +89,15 @@ bool connectMqtt() {
     return true;
   }
   
-  // Check if WiFi is connected first
+  // Check WiFi first
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi disconnected! Not attempting MQTT connection");
+    if (mqtt_debug) Serial.println("WiFi disconnected - skipping MQTT connection");
     return false;
   }
   
-  Serial.print("Attempting MQTT connection...");
+  Serial.print("Attempting MQTT connection... ");
   
-  // Last will testament message for offline status
+  // Last will testament message
   StaticJsonDocument<128> lastWillDoc;
   lastWillDoc["status"] = "offline";
   lastWillDoc["device_id"] = mqtt_client_id;
@@ -93,63 +106,36 @@ bool connectMqtt() {
   char lastWillBuffer[128];
   size_t n = serializeJson(lastWillDoc, lastWillBuffer);
   
-  // Set a shorter client timeout to prevent hanging
-  espClient.setTimeout(2000); // 2 second timeout
+  // Set a very short client timeout
+  espClient.setTimeout(500);
   
-  // Try to connect with last will message, with a timeout
-  unsigned long connectStart = millis();
-  
-  // Non-blocking connection attempt with timeout
+  // Non-blocking connection attempt
   bool result = mqttClient.connect(mqtt_client_id, NULL, NULL, mqtt_topic_status, 0, true, lastWillBuffer);
   
   if (result) {
     Serial.println("connected!");
-    
-    // Immediately publish an online status update
-    publishStatusUpdate(true);
     return true;
   } else {
-    Serial.print("failed, rc=");
-    Serial.print(mqttClient.state());
-    
-    // Human-readable error message
-    switch (mqttClient.state()) {
-      case -4: Serial.println(" (connection timeout)"); break;
-      case -3: Serial.println(" (connection lost)"); break;
-      case -2: Serial.println(" (connect failed)"); break;
-      case -1: Serial.println(" (disconnected)"); break;
-      case 1: Serial.println(" (bad protocol)"); break;
-      case 2: Serial.println(" (bad client ID)"); break;
-      case 3: Serial.println(" (server unavailable)"); break;
-      case 4: Serial.println(" (bad credentials)"); break;
-      case 5: Serial.println(" (unauthorized)"); break;
-      default: Serial.println(" (unknown error)"); break;
+    // Don't print detailed errors in normal mode to reduce serial overhead
+    if (mqtt_debug) {
+      Serial.print("failed, rc=");
+      Serial.println(mqttClient.state());
+    } else {
+      Serial.println("failed");
     }
     return false;
   }
 }
 
 /**
- * Publish device status information to MQTT
- * This function is meant for the device status dashboard
- * 
- * @param forceUpdate Force immediate update regardless of timer
+ * Non-blocking status update publisher
  */
-void publishStatusUpdate(bool forceUpdate) {
+bool publishStatusUpdateNonBlocking(bool forceUpdate) {
   unsigned long currentMillis = millis();
   
   // Only update periodically unless forced
   if (!forceUpdate && (currentMillis - lastStatusUpdate < STATUS_UPDATE_INTERVAL)) {
-    return;
-  }
-  
-  lastStatusUpdate = currentMillis;
-  
-  // Ensure MQTT is connected
-  if (!mqttClient.connected()) {
-    if (!connectMqtt()) {
-      return;
-    }
+    return false;
   }
   
   // Create status JSON document
@@ -157,11 +143,10 @@ void publishStatusUpdate(bool forceUpdate) {
   statusDoc["status"] = "online";
   statusDoc["device_id"] = mqtt_client_id;
   
-  // Add timestamp
+  // Add timestamp 
   if (currentTimeStatus.synchronized) {
     char timeStr[30];
     struct tm timeinfo;
-    // Use currentEpoch directly without dereferencing it
     time_t currentTime = currentTimeStatus.currentEpoch;
     localtime_r(&currentTime, &timeinfo);
     strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
@@ -170,15 +155,13 @@ void publishStatusUpdate(bool forceUpdate) {
     statusDoc["created_at"] = String(currentMillis);
   }
   
-  // Add WiFi information from global status
+  // Add WiFi information
   JsonObject wifiObj = statusDoc.createNestedObject("wifi");
   wifiObj["rssi"] = currentWiFiStatus.rssi;
   
-  // Copy volatile string to local buffer to avoid issues
   char ipBuffer[16];
-  // Need to cast the volatile char* to char* for strncpy
   strncpy(ipBuffer, (const char*)currentWiFiStatus.ip, sizeof(ipBuffer)-1);
-  ipBuffer[sizeof(ipBuffer)-1] = '\0'; // Ensure null termination
+  ipBuffer[sizeof(ipBuffer)-1] = '\0';
   
   wifiObj["ip"] = ipBuffer;
   wifiObj["connected"] = currentWiFiStatus.connected;
@@ -198,29 +181,33 @@ void publishStatusUpdate(bool forceUpdate) {
     Serial.println(mqttBuffer);
   }
   
-  // Convert mqttBuffer to uint8_t* for publish
-  if (mqttClient.publish(mqtt_topic_status, (const uint8_t*)mqttBuffer, n, true)) {
+  // Publish with timeout protection
+  bool published = mqttClient.publish(mqtt_topic_status, (const uint8_t*)mqttBuffer, n, true);
+  
+  if (published) {
+    lastStatusUpdate = currentMillis;
     if (mqtt_debug) Serial.println("Status published successfully");
   } else {
-    Serial.println("Failed to publish status");
+    if (mqtt_debug) Serial.println("Failed to publish status");
   }
+  
+  return published;
 }
 
 /**
- * Publish ECG data to MQTT
- * This function is meant for the real-time dashboard
+ * Non-blocking ECG data publisher
  */
-void publishEcgData() {
-  // Check if we have updated ECG data
-  if (!ecgDataUpdated) {
-    return;
+bool publishEcgDataNonBlocking() {
+  unsigned long currentMillis = millis();
+  
+  // Limit publishing rate to once per second as requested
+  if (currentMillis - lastEcgUpdate < DATA_UPDATE_INTERVAL) {
+    return false;
   }
   
-  // Ensure MQTT is connected
-  if (!mqttClient.connected()) {
-    if (!connectMqtt()) {
-      return;
-    }
+  // Check if we have updated ECG data
+  if (!ecgDataUpdated) {
+    return false;
   }
   
   // Create ECG JSON document
@@ -234,7 +221,6 @@ void publishEcgData() {
   if (currentTimeStatus.synchronized) {
     char timeStr[30];
     struct tm timeinfo;
-    // Use currentEpoch directly without dereferencing it
     time_t currentTime = currentTimeStatus.currentEpoch;
     localtime_r(&currentTime, &timeinfo);
     strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
@@ -246,52 +232,57 @@ void publishEcgData() {
   // Create ECG data array
   JsonArray ecgArray = ecgDoc.createNestedArray("ecg_data");
   
-  // Add ECG samples - Create simulated waveform based on the raw value
-  for (int i = 0; i < 20; i++) {
-    // Generate a basic ECG-like pattern
-    int value = currentEcgData.rawValue;
-    
-    // Add a simulated peak every 5th point for a simple ECG-like pattern
-    if (i % 5 == 0) {
-      value += random(50, 100);
-    } else if (i % 5 == 1) {
-      value -= random(20, 40);
+  // Try to get ECG data from the buffer
+  bool hasRealData = false;
+  
+  // Use a very short timeout for semaphore (10ms)
+  if (xSemaphoreTake(ecgDataSemaphore, pdMS_TO_TICKS(10)) == pdTRUE) {
+    // Add samples to array - use only a small number to reduce processing
+    for (int i = 0; i < 10; i++) {
+      int idx = (bufferIndex - i - 1 + ECG_BUFFER_SIZE) % ECG_BUFFER_SIZE;
+      ecgArray.add(ecgBuffer[idx]);
     }
-    
-    ecgArray.add(value + random(-10, 10));
+    hasRealData = true;
+    xSemaphoreGive(ecgDataSemaphore);
+  } else {
+    if (mqtt_debug) Serial.println("MQTT Task: Failed to acquire ECG semaphore");
+  }
+  
+  // If no real data, skip publishing
+  if (!hasRealData) {
+    return false;
   }
   
   // Serialize JSON to buffer
   size_t n = serializeJson(ecgDoc, mqttBuffer);
   
   // Publish ECG data
-  if (mqtt_debug) {
-    Serial.print("Publishing ECG data: ");
-    Serial.println(mqttBuffer);
-  }
+  bool published = mqttClient.publish(mqtt_topic_realtime, (const uint8_t*)mqttBuffer, n);
   
-  if (mqttClient.publish(mqtt_topic_realtime, (const uint8_t*)mqttBuffer, n)) {
+  if (published) {
+    lastEcgUpdate = currentMillis;
     if (mqtt_debug) Serial.println("ECG data published successfully");
-  } else {
+  } else if (mqtt_debug) {
     Serial.println("Failed to publish ECG data");
   }
+  
+  return published;
 }
 
 /**
- * Publish GPS location data to MQTT
- * This function is meant for the real-time dashboard
+ * Non-blocking GPS data publisher
  */
-void publishGpsData() {
-  // Check if we have updated GPS data
-  if (!gpsDataUpdated) {
-    return;
+bool publishGpsDataNonBlocking() {
+  unsigned long currentMillis = millis();
+  
+  // Limit publishing rate to once per second as requested
+  if (currentMillis - lastGpsUpdate < DATA_UPDATE_INTERVAL) {
+    return false;
   }
   
-  // Ensure MQTT is connected
-  if (!mqttClient.connected()) {
-    if (!connectMqtt()) {
-      return;
-    }
+  // Check if we have updated GPS data
+  if (!gpsDataUpdated) {
+    return false;
   }
   
   // Create GPS JSON document
@@ -303,7 +294,6 @@ void publishGpsData() {
   if (currentTimeStatus.synchronized) {
     char timeStr[30];
     struct tm timeinfo;
-    // Use currentEpoch directly without dereferencing it
     time_t currentTime = currentTimeStatus.currentEpoch;
     localtime_r(&currentTime, &timeinfo);
     strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
@@ -317,14 +307,10 @@ void publishGpsData() {
   locationObj["latitude"] = String(currentGpsData.latitude, 6);
   locationObj["longitude"] = String(currentGpsData.longitude, 6);
   
-  // Only add altitude if it's available - using altitude field directly
-  // FIX: altitudeValid doesn't exist, checking if altitude is non-zero
   if (currentGpsData.altitude != 0.0) {
     locationObj["altitude"] = currentGpsData.altitude;
   }
   
-  // Only add speed if it's valid - using speed field directly
-  // FIX: speedValid doesn't exist, checking if speed is non-zero
   if (currentGpsData.speed != 0.0) {
     locationObj["speed"] = currentGpsData.speed;
   }
@@ -333,48 +319,45 @@ void publishGpsData() {
   size_t n = serializeJson(gpsDoc, mqttBuffer);
   
   // Publish GPS data
-  if (mqtt_debug) {
-    Serial.print("Publishing GPS data: ");
-    Serial.println(mqttBuffer);
-  }
+  bool published = mqttClient.publish(mqtt_topic_realtime, (const uint8_t*)mqttBuffer, n);
   
-  if (mqttClient.publish(mqtt_topic_realtime, (const uint8_t*)mqttBuffer, n)) {
+  if (published) {
+    lastGpsUpdate = currentMillis;
     if (mqtt_debug) Serial.println("GPS data published successfully");
-  } else {
+  } else if (mqtt_debug) {
     Serial.println("Failed to publish GPS data");
   }
+  
+  return published;
 }
 
 /**
- * Publish fall detection event to MQTT
- * This function is meant for the real-time dashboard (for alerts)
+ * Non-blocking fall detection data publisher
  */
-void publishFallData() {
-  // Check if we have a fall detection event
-  if (!fallDetectionUpdated) {
-    return;
+bool publishFallDataNonBlocking() {
+  unsigned long currentMillis = millis();
+  
+  // Only publish falls at most once per second
+  if (currentMillis - lastFallUpdate < DATA_UPDATE_INTERVAL) {
+    return false;
   }
   
-  // Ensure MQTT is connected
-  if (!mqttClient.connected()) {
-    if (!connectMqtt()) {
-      return;
-    }
+  // Check if there is a fall event to publish
+  if (!fallDetectionUpdated || !currentFallEvent.fallDetected) {
+    return false;
   }
   
   // Create fall detection JSON document
   StaticJsonDocument<256> fallDoc;
   fallDoc["type"] = "fall";
   fallDoc["device_id"] = mqtt_client_id;
-  fallDoc["fall_detected"] = currentFallEvent.fallDetected ? 1 : 0;
-  // Fix: using acceleration instead of impactStrength
+  fallDoc["fall_detected"] = 1; // We know it's detected at this point
   fallDoc["impact_strength"] = currentFallEvent.acceleration;
   
   // Add timestamp
   if (currentTimeStatus.synchronized) {
     char timeStr[30];
     struct tm timeinfo;
-    // Use currentEpoch directly without dereferencing it
     time_t currentTime = currentTimeStatus.currentEpoch;
     localtime_r(&currentTime, &timeinfo);
     strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
@@ -384,127 +367,143 @@ void publishFallData() {
   }
   
   // Add detailed fall information
-  if (currentFallEvent.fallDetected) {
-    JsonObject detailsObj = fallDoc.createNestedObject("details");
-    
-    // Fix: direction doesn't exist, using orientation[0] and mapping to a cardinal direction
-    float pitch = currentFallEvent.orientation[0];
-    String direction;
-    if (pitch > 45) direction = "forward";
-    else if (pitch < -45) direction = "backward";
-    else direction = "sideways";
-    detailsObj["direction"] = direction;
-    
-    // Fix: severity exists as fallSeverity
-    detailsObj["severity"] = currentFallEvent.fallSeverity;
-    
-    // Fix: latitude/longitude don't exist in FallEvent - use currentGpsData if available
-    if (gpsDataUpdated) {
-      JsonObject locationObj = detailsObj.createNestedObject("location");
-      locationObj["latitude"] = String(currentGpsData.latitude, 6);
-      locationObj["longitude"] = String(currentGpsData.longitude, 6);
-    }
+  JsonObject detailsObj = fallDoc.createNestedObject("details");
+  
+  // Map orientation to direction
+  float pitch = currentFallEvent.orientation[0];
+  String direction;
+  if (pitch > 45) direction = "forward";
+  else if (pitch < -45) direction = "backward";
+  else direction = "sideways";
+  detailsObj["direction"] = direction;
+  
+  detailsObj["severity"] = currentFallEvent.fallSeverity;
+  
+  // Add location if available
+  if (gpsDataUpdated) {
+    JsonObject locationObj = detailsObj.createNestedObject("location");
+    locationObj["latitude"] = String(currentGpsData.latitude, 6);
+    locationObj["longitude"] = String(currentGpsData.longitude, 6);
   }
   
   // Serialize JSON to buffer
   size_t n = serializeJson(fallDoc, mqttBuffer);
   
   // Publish fall data
-  if (mqtt_debug) {
-    Serial.print("Publishing fall data: ");
-    Serial.println(mqttBuffer);
-  }
+  bool published = mqttClient.publish(mqtt_topic_realtime, (const uint8_t*)mqttBuffer, n);
   
-  if (mqttClient.publish(mqtt_topic_realtime, (const uint8_t*)mqttBuffer, n)) {
+  if (published) {
+    lastFallUpdate = currentMillis;
     if (mqtt_debug) Serial.println("Fall data published successfully");
-  } else {
+  } else if (mqtt_debug) {
     Serial.println("Failed to publish fall data");
   }
+  
+  return published;
 }
 
 /**
- * Main MQTT task that runs continuously
- * 
- * @param pvParameters Task parameters (not used)
+ * Wrapper functions for backward compatibility with existing code
+ * These functions call the non-blocking versions
+ */
+
+// Original publishEcgData function that other tasks call
+void publishEcgData() {
+  publishEcgDataNonBlocking();
+}
+
+// Original publishGpsData function that other tasks call
+void publishGpsData() {
+  publishGpsDataNonBlocking();
+}
+
+// Original publishFallData function that other tasks might call
+void publishFallData() {
+  publishFallDataNonBlocking();
+}
+
+// Original publishStatusUpdate function that other tasks might call
+void publishStatusUpdate(bool forceUpdate) {
+  publishStatusUpdateNonBlocking(forceUpdate);
+}
+
+/**
+ * Main MQTT task with cooperative multitasking design
  */
 void mqttTask(void *pvParameters) {
   // Initialize MQTT client
   setupMqtt();
-  
   Serial.println("MQTT task started");
   
-  // Use for non-blocking operations
+  // Simple cooperative task manager - no complex state machine needed
   unsigned long lastYieldTime = 0;
-  const unsigned long YIELD_INTERVAL = 50; // Yield every 50ms
+  
+  // Initialize timing variables
+  lastEcgUpdate = 0;
+  lastGpsUpdate = 0;
+  lastFallUpdate = 0;
+  lastStatusUpdate = 0;
+  lastConnectAttempt = 0;
   
   while (true) {
+    // Always yield every 100ms maximum
     unsigned long currentTime = millis();
+    if (currentTime - lastYieldTime >= 100) {
+      vTaskDelay(pdMS_TO_TICKS(10)); // 10ms delay for yielding
+      lastYieldTime = currentTime;
+      continue; // Start fresh after yielding
+    }
     
-    // Wait for WiFi to be connected
+    // Step 1: Check WiFi connection (quick check)
     if (!getWiFiConnected()) {
-      Serial.println("MQTT task: Waiting for WiFi connection...");
-      vTaskDelay(pdMS_TO_TICKS(1000));
+      vTaskDelay(pdMS_TO_TICKS(500)); // Longer delay when no WiFi
+      lastYieldTime = millis();
       continue;
     }
     
-    // Yield frequently to prevent watchdog timeout
-    if (currentTime - lastYieldTime >= YIELD_INTERVAL) {
-      vTaskDelay(1);
-      lastYieldTime = currentTime;
-    }
-    
-    // Ensure MQTT connection with timeout protection
+    // Step 2: Ensure MQTT connection (with non-blocking approach)
     if (!mqttClient.connected()) {
-      bool connected = connectMqtt();
-      // Always yield after connection attempt
-      vTaskDelay(1);
+      bool connected = connectMqttNonBlocking();
+      vTaskDelay(pdMS_TO_TICKS(10)); // Always yield after connection attempt
+      lastYieldTime = millis();
       
       if (!connected) {
-        // If connection failed, wait a bit before retrying
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(500)); // Longer delay if connection failed
+        lastYieldTime = millis();
         continue;
       }
     }
     
-    // MQTT loop with timeout protection
-    unsigned long loopStartTime = millis();
+    // Step 3: Process any pending MQTT messages (keep this quick)
     mqttClient.loop();
+    vTaskDelay(pdMS_TO_TICKS(5)); // Short yield after MQTT loop
     
-    // If loop took too long, yield
-    if (millis() - loopStartTime > 50) {
-      vTaskDelay(1);
+    // Step 4: Publish status update if needed
+    if (publishStatusUpdateNonBlocking(false)) {
+      vTaskDelay(pdMS_TO_TICKS(10)); // Yield after publishing
+      lastYieldTime = millis();
     }
     
-    // Only proceed with publishing if still connected
-    if (mqttClient.connected()) {
-      // 1. Publish device status update periodically
-      publishStatusUpdate(false);
-      
-      // Yield after potentially long operation
-      vTaskDelay(1);
-      
-      // 2. Publish real-time data when available
-      if (ecgDataUpdated) {
-        publishEcgData();
-        // Yield after potentially long operation
-        vTaskDelay(1);
-      }
-      
-      if (gpsDataUpdated) {
-        publishGpsData();
-        // Yield after potentially long operation
-        vTaskDelay(1);
-      }
-      
-      if (fallDetectionUpdated && currentFallEvent.fallDetected) {
-        publishFallData();
-        // Don't reset fallDetectionUpdated here, let the Telegram task handle it first
-        // We'll add a delay to make sure Telegram task gets to process it
-        vTaskDelay(pdMS_TO_TICKS(500));
-      }
+    // Step 5: Publish ECG data (once per second max)
+    if (publishEcgDataNonBlocking()) {
+      vTaskDelay(pdMS_TO_TICKS(10)); // Yield after publishing
+      lastYieldTime = millis();
     }
     
-    // Brief delay to avoid consuming too much CPU
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // Step 6: Publish GPS data (once per second max)
+    if (publishGpsDataNonBlocking()) {
+      vTaskDelay(pdMS_TO_TICKS(10)); // Yield after publishing
+      lastYieldTime = millis();
+    }
+    
+    // Step 7: Publish fall detection data (if needed)
+    if (publishFallDataNonBlocking()) {
+      vTaskDelay(pdMS_TO_TICKS(10)); // Yield after publishing
+      lastYieldTime = millis();
+    }
+    
+    // Final step: Always end with a delay to avoid tight loops
+    vTaskDelay(pdMS_TO_TICKS(50)); // Minimum 50ms between publishing cycles
+    lastYieldTime = millis();
   }
 }

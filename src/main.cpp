@@ -107,7 +107,7 @@ void setup() {
   xTaskCreatePinnedToCore(
     httpTask,               // Task function
     "HTTP",                 // Name 
-    8192,                   // Stack size (bytes)
+    16384,                  // Stack size (bytes) - Increased from 8192 to 16384
     NULL,                   // Parameters
     4,                      // Priority (medium)
     &httpTaskHandle,        // Task handle
