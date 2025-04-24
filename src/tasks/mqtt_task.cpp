@@ -28,16 +28,22 @@ const char* mqtt_topic_status = "elderguard/patient/1/status";
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
-// MQTT message buffer
-char mqttBuffer[512];
+// MQTT message buffer - increased from 512 to 1024 for more headroom
+char mqttBuffer[1024];
 
 // Status update timing
 unsigned long lastStatusUpdate = 0;
 const unsigned long STATUS_UPDATE_INTERVAL = 30000; // 30 seconds
 
-// Connection retry parameters
+// Connection retry parameters - modified for longer backoff
 unsigned long lastConnectAttempt = 0;
-const unsigned long CONNECT_RETRY_INTERVAL = 5000; // 5 seconds between retries
+// Initial retry interval of 5 minutes (300,000ms) as requested
+const unsigned long INITIAL_RETRY_INTERVAL = 300000; 
+unsigned long currentRetryInterval = INITIAL_RETRY_INTERVAL;
+// Maximum retry interval (15 minutes)
+const unsigned long MAX_RETRY_INTERVAL = 900000;
+// Track consecutive failures for exponential backoff
+int consecutiveFailures = 0;
 
 // Debug flag - set to false to disable verbose output
 bool mqtt_debug = false;
@@ -47,6 +53,10 @@ const unsigned long DATA_UPDATE_INTERVAL = 1000;
 unsigned long lastEcgUpdate = 0;
 unsigned long lastGpsUpdate = 0;
 unsigned long lastFallUpdate = 0;
+
+// Connection state tracking
+bool mqttEnabled = true;
+bool previousConnectionState = false;
 
 // Forward declarations
 bool connectMqttNonBlocking();
@@ -60,8 +70,10 @@ bool publishFallDataNonBlocking();
  */
 void setupMqtt() {
   mqttClient.setServer(mqtt_server, mqtt_port);
-  espClient.setTimeout(2000); // Short timeout to prevent blocking
-  mqttClient.setBufferSize(512);
+  // Increase TCP timeout to reduce disconnections for slow networks
+  espClient.setTimeout(5000);
+  // Increase buffer size for more stability
+  mqttClient.setBufferSize(1024);
   
   if (mqtt_debug) {
     Serial.print("MQTT client initialized with broker: ");
@@ -72,13 +84,13 @@ void setupMqtt() {
 }
 
 /**
- * Non-blocking MQTT connection attempt
+ * Non-blocking MQTT connection attempt with improved retry strategy
  */
 bool connectMqttNonBlocking() {
   unsigned long currentMillis = millis();
   
-  // Only retry after interval
-  if (currentMillis - lastConnectAttempt < CONNECT_RETRY_INTERVAL) {
+  // Only retry after current interval
+  if (currentMillis - lastConnectAttempt < currentRetryInterval) {
     return mqttClient.connected();
   }
   
@@ -86,7 +98,16 @@ bool connectMqttNonBlocking() {
   
   // Only attempt reconnection if not already connected
   if (mqttClient.connected()) {
+    // Reset failure counter on successful connection
+    consecutiveFailures = 0;
+    currentRetryInterval = INITIAL_RETRY_INTERVAL;
     return true;
+  }
+  
+  // Check if MQTT is enabled
+  if (!mqttEnabled) {
+    if (mqtt_debug) Serial.println("MQTT disabled due to previous failures");
+    return false;
   }
   
   // Check WiFi first
@@ -106,23 +127,37 @@ bool connectMqttNonBlocking() {
   char lastWillBuffer[128];
   size_t n = serializeJson(lastWillDoc, lastWillBuffer);
   
-  // Set a very short client timeout
-  espClient.setTimeout(500);
+  // Set a reasonable client timeout
+  espClient.setTimeout(2000);
   
   // Non-blocking connection attempt
   bool result = mqttClient.connect(mqtt_client_id, NULL, NULL, mqtt_topic_status, 0, true, lastWillBuffer);
   
   if (result) {
     Serial.println("connected!");
+    // Reset consecutive failures counter and retry interval on success
+    consecutiveFailures = 0;
+    currentRetryInterval = INITIAL_RETRY_INTERVAL;
+    previousConnectionState = true;
     return true;
   } else {
-    // Don't print detailed errors in normal mode to reduce serial overhead
-    if (mqtt_debug) {
-      Serial.print("failed, rc=");
-      Serial.println(mqttClient.state());
-    } else {
-      Serial.println("failed");
+    // Increment consecutive failures and implement exponential backoff
+    consecutiveFailures++;
+    
+    // Implement exponential backoff up to maximum
+    if (consecutiveFailures > 1) {
+      // Double retry interval for each consecutive failure, up to the maximum
+      currentRetryInterval = min(currentRetryInterval * 2, MAX_RETRY_INTERVAL);
     }
+    
+    // Report failure with more details about the retry strategy
+    Serial.print("failed, rc=");
+    Serial.print(mqttClient.state());
+    Serial.print(". Next retry in ");
+    Serial.print(currentRetryInterval / 60000);
+    Serial.println(" minutes");
+    
+    previousConnectionState = false;
     return false;
   }
 }
@@ -286,7 +321,7 @@ bool publishGpsDataNonBlocking() {
   }
   
   // Create GPS JSON document
-  StaticJsonDocument<256> gpsDoc;
+  StaticJsonDocument<384> gpsDoc; // Increased from 256 to 384 for more capacity
   gpsDoc["type"] = "gps";
   gpsDoc["device_id"] = mqtt_client_id;
   
@@ -437,6 +472,7 @@ void mqttTask(void *pvParameters) {
   
   // Simple cooperative task manager - no complex state machine needed
   unsigned long lastYieldTime = 0;
+  unsigned long mqttHealthCheckTime = 0;
   
   // Initialize timing variables
   lastEcgUpdate = 0;
@@ -461,7 +497,7 @@ void mqttTask(void *pvParameters) {
       continue;
     }
     
-    // Step 2: Ensure MQTT connection (with non-blocking approach)
+    // Step 2: Ensure MQTT connection (with non-blocking approach and long backoff)
     if (!mqttClient.connected()) {
       bool connected = connectMqttNonBlocking();
       vTaskDelay(pdMS_TO_TICKS(10)); // Always yield after connection attempt
@@ -475,31 +511,55 @@ void mqttTask(void *pvParameters) {
     }
     
     // Step 3: Process any pending MQTT messages (keep this quick)
-    mqttClient.loop();
-    vTaskDelay(pdMS_TO_TICKS(5)); // Short yield after MQTT loop
+    if (mqttClient.connected()) {
+      // Add timeout protection around MQTT loop
+      unsigned long loopStart = millis();
+      mqttClient.loop();
+      
+      // If loop took too long, there might be an issue
+      if (millis() - loopStart > 100) {
+        Serial.println("Warning: MQTT loop took too long");
+      }
+      
+      vTaskDelay(pdMS_TO_TICKS(5)); // Short yield after MQTT loop
+    }
     
     // Step 4: Publish status update if needed
-    if (publishStatusUpdateNonBlocking(false)) {
+    if (mqttClient.connected() && publishStatusUpdateNonBlocking(false)) {
       vTaskDelay(pdMS_TO_TICKS(10)); // Yield after publishing
       lastYieldTime = millis();
     }
     
     // Step 5: Publish ECG data (once per second max)
-    if (publishEcgDataNonBlocking()) {
+    if (mqttClient.connected() && publishEcgDataNonBlocking()) {
       vTaskDelay(pdMS_TO_TICKS(10)); // Yield after publishing
       lastYieldTime = millis();
     }
     
     // Step 6: Publish GPS data (once per second max)
-    if (publishGpsDataNonBlocking()) {
+    if (mqttClient.connected() && publishGpsDataNonBlocking()) {
       vTaskDelay(pdMS_TO_TICKS(10)); // Yield after publishing
       lastYieldTime = millis();
     }
     
     // Step 7: Publish fall detection data (if needed)
-    if (publishFallDataNonBlocking()) {
+    if (mqttClient.connected() && publishFallDataNonBlocking()) {
       vTaskDelay(pdMS_TO_TICKS(10)); // Yield after publishing
       lastYieldTime = millis();
+    }
+    
+    // Health check - periodically check MQTT client state
+    if (currentTime - mqttHealthCheckTime >= 30000) { // Every 30 seconds
+      mqttHealthCheckTime = currentTime;
+      
+      if (mqttClient.connected() != previousConnectionState) {
+        if (mqttClient.connected()) {
+          Serial.println("MQTT client reconnected");
+        } else {
+          Serial.println("MQTT client disconnected");
+        }
+        previousConnectionState = mqttClient.connected();
+      }
     }
     
     // Final step: Always end with a delay to avoid tight loops

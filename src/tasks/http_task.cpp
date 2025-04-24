@@ -26,6 +26,7 @@ const char* LARAVEL_API_URL = "https://elderguard.codecommerce.info/api";
 const char* SENSOR_DATA_ENDPOINT = "/sensor-data";
 const char* ALERT_ENDPOINT = "/alerts";
 const char* LOCATION_ENDPOINT = "/location-tracking";
+const char* PATIENT_LOCATION_ENDPOINT = "/patients/1/locations"; // New endpoint for patient specific location
 
 // Telegram Bot settings
 const char* TELEGRAM_BOT_TOKEN = "7250747996:AAGZ_luXdgcnZls1QddK5z2UQ2TUVzjvgzY";
@@ -96,6 +97,7 @@ void httpTask(void *pvParameters) {
       if (xSemaphoreTake(gpsDataSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
         if (currentGpsData.validFix && (currentTime - lastLocationUpdateTime > 60000)) {
           sendLocationData();
+          sendPatientLocationData(); // Send patient-specific location data
           lastLocationUpdateTime = currentTime;
         }
         
@@ -445,4 +447,66 @@ void sendTelegramMessage(const char* message) {
   
   // Brief delay to avoid hammering the API
   vTaskDelay(pdMS_TO_TICKS(100));
+}
+
+/**
+ * Send location data to patient-specific location endpoint
+ * Only sends if coordinates are not (0,0)
+ */
+void sendPatientLocationData() {
+  if (xSemaphoreTake(gpsDataSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
+    // Only proceed if we have a valid fix and coordinates are not (0,0)
+    if (!currentGpsData.validFix || 
+        (currentGpsData.latitude == 0.0 && currentGpsData.longitude == 0.0)) {
+      xSemaphoreGive(gpsDataSemaphore);
+      return;
+    }
+    
+    // Create JSON for location data
+    StaticJsonDocument<256> doc;
+    doc["latitude"] = currentGpsData.latitude;
+    doc["longitude"] = currentGpsData.longitude;
+    doc["timestamp"] = millis(); // Using millis as timestamp
+    
+    // Serialize JSON
+    String jsonData;
+    serializeJson(doc, jsonData);
+    
+    // Create HTTP client
+    HTTPClient http;
+    String url = String(LARAVEL_API_URL) + String(PATIENT_LOCATION_ENDPOINT);
+    
+    // Use secure client for HTTPS
+    http.begin(secureClient, url);
+    http.setTimeout(HTTP_TIMEOUT);
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Accept", "application/json");
+    
+    // Send with retry logic
+    bool success = false;
+    int retries = 0;
+    
+    while (!success && retries < HTTP_MAX_RETRIES) {
+      int httpResponseCode = http.POST(jsonData);
+      String responseBody = http.getString();
+      
+      if (httpResponseCode >= 200 && httpResponseCode < 300) {
+        Serial.printf("HTTP Task: Patient location data sent to specific endpoint, response code: %d\n", httpResponseCode);
+        success = true;
+      } else {
+        Serial.printf("HTTP Task: Failed to send patient location data, error code: %d (attempt %d/%d)\n", 
+                     httpResponseCode, retries + 1, HTTP_MAX_RETRIES);
+        Serial.println("HTTP Task: Response body: " + responseBody);
+        retries++;
+        
+        if (retries < HTTP_MAX_RETRIES) {
+          vTaskDelay(pdMS_TO_TICKS(HTTP_RETRY_DELAY_MS));
+        }
+      }
+    }
+    
+    http.end();
+    
+    xSemaphoreGive(gpsDataSemaphore);
+  }
 }
