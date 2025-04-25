@@ -1,6 +1,6 @@
 # ElderGuard - IoT Health Monitoring System for Elderly Care
 
-![ElderGuard Logo](https://github.com/aland-omed/ElderGuardesp32devkitv1/raw/main/docs/images/logo.png)
+![ElderGuard Logo](https://elderguard.codecommerce.info/build/images/logo-dark.png)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/Version-3.0-green.svg)](https://github.com/aland-omed/ElderGuardesp32devkitv1)
