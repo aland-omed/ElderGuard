@@ -1,49 +1,20 @@
-# Copyright and Legal Information
+# ElderGuard Project Information
 
-## ElderGuard - IoT Health Monitoring System for Elderly Care
+## Copyright Notice
 
-Copyright © 2025 Komar University of Science and Technology
-All Rights Reserved.
+Copyright (c) 2025 Komar University of Science and Technology  
+All code, hardware designs, documentation, and related materials are provided under the MIT License.
 
-This project, known as "ElderGuard" including all hardware designs, software code, 
-documentation, and related materials was created as a graduation project by:
+## Project Information
+
+**ElderGuard - IoT Health Monitoring System for Elderly Care**  
+This project was created as a graduation project by:
 - Aland Omed
 - Harun Hameed
 - Zhir Jamil
 
-The ElderGuard system, including its design, code, and documentation:
-- Developed as a Komar University Graduation Project
-- Initial Release: April 2025
-- Current Version: V3.0 (April 26, 2025)
-
-## License Terms
-
-This project is licensed under the MIT License:
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-For academic and educational use, proper attribution to the original authors and 
-Komar University of Science and Technology is required.
-
-For inquiries regarding this project, please contact:
-The Department of Computer Science, Komar University of Science and Technology
-
-## Disclaimer
-
-THE SOFTWARE AND HARDWARE DESIGNS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, 
-WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+Initial Release: April 2025  
+Current Version: V3.0 (April 26, 2025)
 
 ## Trademark Notice
 
@@ -68,6 +39,12 @@ This project incorporates the following open-source software, which are licensed
 
 The acknowledgment of these open-source libraries does not imply any endorsement of the ElderGuard product by the respective copyright holders.
 
+## Contact Information
+
+For inquiries regarding this project, please contact:  
+The Department of Computer Engineering  
+Komar University of Science and Technology
+
 ---
 
-*ElderGuard - Caring technology for independent living*
+*For the full license text, see the LICENSE file in the project root.*
