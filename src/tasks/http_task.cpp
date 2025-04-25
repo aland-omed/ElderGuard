@@ -21,6 +21,14 @@
 // Define ECG_BUFFER_SIZE to match the value in ecg_task.cpp
 #define ECG_BUFFER_SIZE 250  // 5 seconds at 50Hz
 
+// Function declarations
+void sendSensorData();
+void sendHeartRateAlert(int heartRate);
+void sendLocationData();
+void sendTelegramMessage(const char* message);
+void sendPatientLocationData();
+void getEcgData(char* buffer, int maxSize);
+
 // Laravel API settings
 const char* LARAVEL_API_URL = "https://elderguard.codecommerce.info/api";
 const char* SENSOR_DATA_ENDPOINT = "/sensor-data";

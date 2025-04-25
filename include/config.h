@@ -72,8 +72,8 @@
 
 // WiFi and Time Management Constants
 // ------------------------------
-#define WIFI_SSID "ZzZ"        // Default SSID
-#define WIFI_PASSWORD "zhir1234"      // Default password
+#define WIFI_SSID "iQ omed 2..4"        // Default SSID
+#define WIFI_PASSWORD "qatarchi67"      // Default password
 #define WIFI_CONNECT_TIMEOUT_MS 30000         // WiFi connection timeout (30 sec)
 #define WIFI_RECONNECT_INTERVAL_MS 60000      // Attempt reconnection every minute
 #define WIFI_TASK_INTERVAL_MS 5000            // Check WiFi status every 5 seconds
