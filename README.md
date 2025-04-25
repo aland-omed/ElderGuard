@@ -2,99 +2,207 @@
 
 ![ElderGuard Logo](https://github.com/aland-omed/ElderGuardesp32devkitv1/raw/main/docs/images/logo.png)
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/Version-3.0-green.svg)](https://github.com/aland-omed/ElderGuardesp32devkitv1)
+[![Platform](https://img.shields.io/badge/Platform-ESP32-red.svg)](https://www.espressif.com/en/products/socs/esp32)
+
 ## Overview
 
 ElderGuard is a comprehensive IoT-based health monitoring system designed specifically for elderly care. Built on the ESP32 platform, the system provides real-time health monitoring, fall detection, location tracking, and medication reminders to help elderly individuals maintain independence while ensuring their safety and well-being.
 
-## Features
+## Key Features
 
-- **ECG Monitoring**: Real-time heart rate and ECG signal monitoring
-- **Fall Detection**: Automatic detection of falls using accelerometer data
-- **GPS Tracking**: Location monitoring for outdoor activities
-- **Medication Reminders**: Scheduled alerts for medication
-- **Audio Alerts**: Voice notifications for important events
-- **OLED Display**: User interface for status information
-- **Multi-tasking Architecture**: Built on FreeRTOS for reliable performance
+- **Health Monitoring**
+  - Real-time ECG and heart rate monitoring
+  - Continuous vital sign tracking
+  - Health data logging and analysis
+
+- **Safety Features**
+  - Advanced fall detection algorithm using MPU6050
+  - Emergency alert system
+  - Real-time GPS location tracking
+
+- **Medication Management**
+  - Scheduled medication reminders
+  - Compliance tracking
+  - Configurable dosage information
+
+- **User Interface**
+  - OLED display with intuitive information layout
+  - Voice alerts and notifications
+  - Simple control interface for elderly users
+
+- **Connectivity**
+  - Wi-Fi for home network connection
+  - MQTT for real-time data transmission
+  - HTTP for web-based monitoring interface
+  - OTA firmware updates
 
 ## Hardware Components
 
-- ESP32 DevKit V1 (Main controller)
-- AD8232 ECG Module
-- MPU6050 Accelerometer/Gyroscope
-- NEO-6M GPS Module
-- OLED Display (SSD1306)
-- MP3-TF-16P Audio Module
-- Various connecting wires and power management components
+| Component | Purpose | Interface |
+|-----------|---------|-----------|
+| ESP32 DevKit V1 | Main controller | - |
+| AD8232 ECG Module | Heart monitoring | Analog |
+| MPU6050 Accelerometer | Fall detection | I2C |
+| NEO-6M GPS Module | Location tracking | Serial (UART) |
+| SSD1306 OLED Display | User interface | I2C |
+| MP3-TF-16P Module | Audio notifications | Serial (UART) |
+| LiPo Battery | Power source | - |
 
 ## System Architecture
 
-ElderGuard uses a task-based architecture with FreeRTOS:
+ElderGuard uses a multi-tasking architecture based on FreeRTOS:
 
-- **ECG Task**: Monitors heart rate and ECG signals
-- **Fall Detection Task**: Processes accelerometer data to detect falls
-- **GPS Task**: Handles location tracking
-- **Medication Task**: Manages medication schedules and reminders
-- **Screen Task**: Controls the OLED display interface
-- **Audio Task**: Manages audio notifications and alerts
+```
+                  ┌─────────────────┐
+                  │     ESP32       │
+                  │  Main Controller│
+                  └────────┬────────┘
+                           │
+       ┌───────────────────┼───────────────────┐
+       │                   │                   │
+┌──────▼──────┐     ┌──────▼──────┐     ┌──────▼──────┐
+│  Sensing    │     │  Processing  │     │ Communication│
+│  Tasks      │     │  Tasks       │     │  Tasks       │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │
+┌──────▼──────┐     ┌──────▼──────┐     ┌──────▼──────┐
+│ ECG Task    │     │Fall Detection│     │ WiFi Task   │
+│ GPS Task    │     │Medication    │     │ MQTT Task   │
+└─────────────┘     │Time Task     │     │ HTTP Task   │
+                    └─────────────┘     └─────────────┘
+```
 
-Tasks communicate using FreeRTOS queues and are synchronized with semaphores for shared resources.
+### Task Organization
+
+The system is organized into multiple FreeRTOS tasks, each handling a specific function:
+
+- **Sensing Tasks**
+  - `ecg_task`: Monitors heart signals and processes ECG data
+  - `gps_task`: Handles GPS data acquisition and location tracking
+
+- **Processing Tasks**
+  - `fall_detection_task`: Processes accelerometer data to detect falls
+  - `medication_task`: Manages medication schedules and reminds
+  - `time_task`: Maintains system time via NTP
+
+- **Interface Tasks**
+  - `screen_task`: Manages the OLED display
+  - `audio_task`: Controls the audio notification system
+
+- **Connectivity Tasks**
+  - `wifi_task`: Handles WiFi connectivity
+  - `mqtt_task`: Manages MQTT communication
+  - `http_task`: Provides HTTP server functionality
+  - `firmware_update_task`: Handles OTA updates
 
 ## Setup and Installation
 
 ### Prerequisites
 - PlatformIO IDE (recommended) or Arduino IDE
 - ESP32 board support package
-- Required libraries (listed in platformio.ini)
+- Required libraries (see below)
+
+### Required Libraries
+All dependencies are managed through PlatformIO:
+- Adafruit GFX Library
+- Adafruit SH110X
+- Adafruit MPU6050
+- Adafruit Unified Sensor
+- TinyGPSPlus
+- DFRobotDFPlayerMini
+- NTPClient
+- PubSubClient
+- ArduinoJson
+- WebSockets
 
 ### Hardware Setup
-1. Connect all components according to the pin definitions in `include/config.h`
-2. Power the system using a suitable power source (LiPo battery recommended)
+1. Connect components according to the pin definitions in `include/config.h`
+2. Ensure proper power distribution
+3. Verify all sensor connections
 
 ### Software Installation
 1. Clone this repository:
    ```
    git clone https://github.com/aland-omed/ElderGuardesp32devkitv1.git
    ```
-2. Open the project in PlatformIO or Arduino IDE
-3. Install the required dependencies
-4. Upload the firmware to your ESP32
+2. Open the project in PlatformIO
+3. Build and upload to your ESP32
 
-## Usage
+## Configuration
 
-1. Power on the ElderGuard device
-2. The system will automatically initialize and start all monitoring tasks
-3. The OLED display shows current status information
-4. Audio alerts will sound for important events (falls, medication times)
+The system is configured through the `config.h` file, which contains:
+- Pin definitions for all connected hardware
+- Network settings
+- MQTT broker information
+- System parameters and thresholds
+
+## Usage Guide
+
+1. Power on the device
+2. Wait for system initialization (displayed on OLED)
+3. The system will automatically:
+   - Connect to WiFi
+   - Synchronize time
+   - Start all monitoring tasks
+4. View system status on the OLED display
+5. Alerts will be provided through:
+   - Audio notifications
+   - OLED display
+   - MQTT messages to connected services
 
 ## Project Structure
 
 ```
 ElderGuard/
-├── include/            # Header files
-│   ├── audio_task.h    # Audio notification system
-│   ├── config.h        # System configuration and pin definitions
-│   ├── ecg_task.h      # ECG monitoring functionality
+├── include/                  # Header files
+│   ├── audio_task.h          # Audio notifications
+│   ├── config.h              # System configuration
+│   ├── ecg_task.h            # ECG monitoring
 │   ├── fall_detection_task.h # Fall detection algorithms
-│   ├── gps_task.h      # GPS tracking functionality
-│   ├── medication_task.h # Medication reminder system
-│   └── screen_task.h   # OLED display interface
-├── src/                # Source files
-│   ├── main.cpp        # Main application entry point
-│   └── tasks/          # Implementation of system tasks
-│       ├── audio_task.cpp
-│       ├── ecg_task.cpp
-│       ├── fall_detection_task.cpp
-│       ├── gps_task.cpp
-│       ├── medication_task.cpp
-│       └── screen_task.cpp
-├── platformio.ini      # PlatformIO configuration
-├── COPYRIGHT.md        # Copyright and license information
-└── README.md           # Project documentation
+│   ├── firmware_update_task.h# OTA update functionality
+│   ├── globals.h             # Global variables & structures
+│   ├── gps_task.h            # GPS location tracking
+│   ├── http_task.h           # HTTP server implementation
+│   ├── medication_task.h     # Medication reminders
+│   ├── mqtt_task.h           # MQTT client implementation
+│   ├── screen_task.h         # OLED display controller
+│   ├── time_task.h           # NTP time synchronization
+│   └── wifi_task.h           # WiFi connectivity
+├── src/                      # Source files
+│   ├── globals.cpp           # Global variables implementation
+│   ├── main.cpp              # Main program entry point
+│   └── tasks/                # Task implementations
+│       ├── audio_task.cpp    # Audio system implementation
+│       ├── ecg_task.cpp      # ECG monitoring implementation
+│       ├── fall_detection_task.cpp # Fall detection implementation
+│       ├── firmware_update_task.cpp # OTA updates implementation
+│       ├── gps_task.cpp      # GPS task implementation
+│       ├── http_task.cpp     # HTTP server implementation
+│       ├── medication_task.cpp # Medication reminder implementation
+│       ├── mqtt_task.cpp     # MQTT client implementation
+│       ├── screen_task.cpp   # OLED display implementation
+│       ├── time_task.cpp     # Time synchronization implementation
+│       └── wifi_task.cpp     # WiFi connection handling
+├── platformio.ini            # PlatformIO configuration
+├── COPYRIGHT.md              # Copyright and license information
+└── README.md                 # Project documentation
 ```
 
-## Contributing
+## Development Status
 
-This project was developed as a graduation project at Komar University of Science and Technology. While it is primarily for educational purposes, we welcome suggestions and improvements through GitHub issues and pull requests.
+- Current Version: V3.0 (April 2025)
+- Status: Active Development
+- Last Updated: April 26, 2025
+
+## Future Enhancements
+
+- Cloud integration for data storage and analysis
+- Mobile app companion for remote monitoring
+- Machine learning for improved fall detection
+- Additional health sensors integration
+- Battery optimization for extended runtime
 
 ## Authors
 
@@ -102,16 +210,17 @@ This project was developed as a graduation project at Komar University of Scienc
 - **Harun Hameed**
 - **Zhir Jamil**
 
+Project developed as a graduation project at Komar University of Science and Technology.
+
 ## License
 
-Copyright © 2025 Komar University of Science and Technology. All Rights Reserved.
-
-This project is licensed for educational and non-commercial use only. See the [COPYRIGHT.md](COPYRIGHT.md) file for details.
+This project is licensed under the MIT License - see the [COPYRIGHT.md](COPYRIGHT.md) file for details.
 
 ## Acknowledgments
 
-- Komar University of Science and Technology
-- All open-source libraries used (Arduino Core for ESP32, Adafruit libraries, TinyGPS++, ArduinoJson, PubSubClient)
+- Komar University of Science and Technology for supporting this project
+- All contributors to the open-source libraries used in this project
+- The ESP32 community for their extensive resources and examples
 
 ---
 
