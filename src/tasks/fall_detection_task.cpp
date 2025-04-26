@@ -367,28 +367,62 @@ void reportFallEvent(float pitchChange, float rollChange) {
     
     Serial.println("Fall event signaled - Would send HTTP alert immediately");
     
-    // Send Telegram message with location information if available
-    char telegramMsg[256];
-    
-    if (gpsDataUpdated && currentGpsData.latitude != 0 && currentGpsData.longitude != 0) {
-      // Create Google Maps link with the GPS coordinates
-      char locationLink[128];
-      snprintf(locationLink, sizeof(locationLink), 
-              "https://maps.google.com/maps?q=%.6f,%.6f", 
-              currentGpsData.latitude, currentGpsData.longitude);
+    // Prepare Telegram message in a thread-safe manner
+    if (xSemaphoreTake(telegramAlertSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
+      // Reset the alert structure
+      memset((void*)&currentTelegramAlert, 0, sizeof(TelegramAlert));
       
-      // Create the full message with location
-      snprintf(telegramMsg, sizeof(telegramMsg), 
-              "⚠️ FALL DETECTED! ⚠️\nSeverity: %d/10\nLocation: %s", 
-              currentFallEvent.fallSeverity, locationLink);
-    } else {
-      // Create message without location
-      snprintf(telegramMsg, sizeof(telegramMsg), 
-              "⚠️ FALL DETECTED! ⚠️\nSeverity: %d/10\nLocation: No GPS signal available", 
-              currentFallEvent.fallSeverity);
+      // Get fresh GPS data to ensure we have the latest information
+      bool locationAvailable = false;
+      float lat = 0.0f, lng = 0.0f;
+      
+      // Try to get current GPS data with semaphore protection
+      // Using a shorter timeout to prevent blocking too long
+      if (xSemaphoreTake(gpsDataSemaphore, pdMS_TO_TICKS(50)) == pdTRUE) {
+        locationAvailable = currentGpsData.validFix && 
+                           (currentGpsData.latitude != 0.0f || currentGpsData.longitude != 0.0f);
+                           
+        // Store the coordinates locally if they're valid
+        if (locationAvailable) {
+          lat = currentGpsData.latitude;
+          lng = currentGpsData.longitude;
+          Serial.printf("Fall Detection: Valid GPS coordinates found: %.6f, %.6f\n", lat, lng);
+        } else {
+          Serial.println("Fall Detection: No valid GPS coordinates available");
+        }
+        
+        // Always ensure we release the semaphore
+        xSemaphoreGive(gpsDataSemaphore);
+      } else {
+        // If we couldn't take the semaphore, don't block and proceed without GPS data
+        Serial.println("Fall Detection: Could not access GPS data (semaphore timeout)");
+        locationAvailable = false;
+      }
+      
+      // Create alert message for Telegram based on GPS availability
+      if (locationAvailable) {
+        snprintf((char*)currentTelegramAlert.message, sizeof(currentTelegramAlert.message),
+                "⚠️ FALL DETECTED! ⚠️\nSeverity: %d/10\nLocation available", 
+                currentFallEvent.fallSeverity);
+        
+        // Flag that we have location data and store the coordinates
+        currentTelegramAlert.hasFallLocation = true;
+      } else {
+        snprintf((char*)currentTelegramAlert.message, sizeof(currentTelegramAlert.message),
+                "⚠️ FALL DETECTED! ⚠️\nSeverity: %d/10\nLocation: No GPS signal available", 
+                currentFallEvent.fallSeverity);
+        
+        currentTelegramAlert.hasFallLocation = false;
+      }
+      
+      // Set the pending flag
+      currentTelegramAlert.pending = true;
+      telegramAlertUpdated = true;
+      
+      xSemaphoreGive(telegramAlertSemaphore);
+      
+      // HTTP task will check telegramAlertUpdated flag and handle sending
+      Serial.println("Telegram alert queued for sending by HTTP task");
     }
-    
-    // Send the message using the function we added to mqtt_task
-    sendTelegramMessage(telegramMsg);
   }
 }

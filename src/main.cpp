@@ -62,8 +62,23 @@ void setup() {
   audioCommandSemaphore = xSemaphoreCreateBinary();
   wifiStatusSemaphore = xSemaphoreCreateBinary();
   timeStatusSemaphore = xSemaphoreCreateBinary();
+  telegramAlertSemaphore = xSemaphoreCreateBinary(); // Initialize our new semaphore
+  
+  // Give initial values to binary semaphores so they can be taken first time
+  xSemaphoreGive(telegramAlertSemaphore);
+  xSemaphoreGive(ecgDataSemaphore);
+  xSemaphoreGive(gpsDataSemaphore);
+  xSemaphoreGive(fallDetectionSemaphore);
+  xSemaphoreGive(medicationSemaphore);
+  xSemaphoreGive(audioCommandSemaphore);
+  xSemaphoreGive(wifiStatusSemaphore);
+  xSemaphoreGive(timeStatusSemaphore);
   
   // Do NOT configure Watchdog timer as requested by the user
+  // Explicitly disable watchdog timer to prevent auto-restarts
+  disableCore0WDT();
+  disableCore1WDT();
+  disableLoopWDT();
   
   // ===== CORE 0 TASKS (Network & Communication) =====
   
@@ -134,7 +149,7 @@ void setup() {
   xTaskCreatePinnedToCore(
     fallDetectionTask,      // Task function
     "FallDetection",        // Name 
-    4096,                   // Stack size (bytes)
+    8192,                   // Stack size (bytes) - Increased from 4096 to 8192 to prevent stack overflow
     NULL,                   // Parameters
     10,                     // Priority (highest on core 1)
     &fallDetectionTaskHandle, // Task handle

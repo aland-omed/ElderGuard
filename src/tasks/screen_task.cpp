@@ -141,193 +141,205 @@ void drawWifiIcon(int rssi) {
 }
 
 // -------------------- Main Display --------------------
+// Redesigned for better organization and clarity
 void displayMainScreen() {
     display.clearDisplay();
     display.setTextColor(SH110X_WHITE);
-
-    // Time - Top center
     display.setTextSize(1);
+
+    // --- Top Bar ---
+    // Time centered
     drawCenteredText(timeString, 2);
-    
-    // WiFi signal strength indicator - Top right
+    // WiFi Icon right
     if (wifiStatusUpdated) {
         drawWifiIcon(currentWiFiStatus.rssi);
     } else {
-        // Default to no signal if WiFi status unknown
+        // Default icon if status unknown
         display.drawBitmap(SCREEN_WIDTH - 12, 2, wifiNone, 8, 8, SH110X_WHITE);
     }
-
-    // Horizontal line below time
+    // Separator
     display.drawFastHLine(0, 12, SCREEN_WIDTH, SH110X_WHITE);
 
-    // Heart Rate with heart icon - Left section
-    // Animate heart icon
+    // --- Heart Rate Area (Left Half) ---
+    // Heart Icon Animation
     unsigned long currentMillis = millis();
-    if (currentMillis - lastHeartBeatAnimation > 1000) {
+    if (currentMillis - lastHeartBeatAnimation > 700) { // Slightly faster beat animation
         heartBeatState = !heartBeatState;
         lastHeartBeatAnimation = currentMillis;
     }
-    
     if (heartBeatState) {
-        display.drawBitmap(5, 18, heartIconSmall, 16, 11, SH110X_WHITE);
+         display.drawBitmap(5, 18, heartIconSmall, 16, 11, SH110X_WHITE);
     } else {
-        display.drawBitmap(5, 18, heartIconSmall, 16, 11, SH110X_WHITE);
+         // Optionally clear the icon area or draw a static version if preferred
+         // For now, just redraw it (subtle blink effect)
+         display.drawBitmap(5, 18, heartIconSmall, 16, 11, SH110X_WHITE);
     }
-
-    // Heart rate value
-    display.setCursor(23, 18);
-    sprintf(heartRateStr, "%d BPM", currentHeartRate);
+    // Heart Rate Value (Larger Font)
+    display.setTextSize(2);
+    sprintf(heartRateStr, "%d", currentHeartRate > 0 ? currentHeartRate : 0); // Show 0 if no signal
+    display.setCursor(25, 18); // Adjusted position
     display.print(heartRateStr);
-
-    // Draw heart health status indicator
-    display.setCursor(5, 30);
+    display.setTextSize(1);
+    display.print(" BPM");
+    // Heart Rate Status (Smaller Font)
+    display.setCursor(5, 38); // Below value
     if (currentHeartRate > 0) {
-        if (currentHeartRate < 60) {
-            display.print("LOW RATE");
-        } else if (currentHeartRate > 100) {
-            display.print("HIGH RATE");
-        } else {
-            display.print("NORMAL");
-        }
+        if (currentHeartRate < 60) display.print("LOW");
+        else if (currentHeartRate > 100) display.print("HIGH");
+        else display.print("NORMAL");
     } else {
-        display.print("NO SIGNAL");
+        display.print("--"); // Indicate no signal clearly
     }
 
-    // Middle divider
-    display.drawFastVLine(SCREEN_WIDTH/2 - 2, 14, 32, SH110X_WHITE);
+    // --- Vertical Divider ---
+    display.drawFastVLine(SCREEN_WIDTH/2 - 1, 14, 34, SH110X_WHITE); // Adjusted height
 
-    // Medicine with pill icon - Right section
+    // --- Medication Area (Right Half) ---
+    display.setTextSize(1);
+    // Pill Icon
     display.drawBitmap(SCREEN_WIDTH/2 + 5, 18, pillIcon, 8, 8, SH110X_WHITE);
+    // Label
     display.setCursor(SCREEN_WIDTH/2 + 15, 18);
-    display.print("Medicine");
-    
-    display.setCursor(SCREEN_WIDTH/2 + 5, 30);
-    // Check if we have an upcoming medication
+    display.print("Next Med:");
+    // Medication Info
+    display.setCursor(SCREEN_WIDTH/2 + 5, 30); // Below label
     if (upcomingMedicationUpdated && upcomingMedication.available) {
-        // Truncate long medication names
-        char shortName[10] = ""; // Buffer for shortened name
+        // Truncate name
+        char shortName[10];
         strncpy(shortName, (const char*)upcomingMedication.name, 9);
-        shortName[9] = '\0'; // Ensure null termination
+        shortName[9] = '\0';
         display.print(shortName);
-        
-        // Show scheduled time
-        display.setCursor(SCREEN_WIDTH/2 + 5, 40);
+        // Time
+        display.setCursor(SCREEN_WIDTH/2 + 5, 40); // Below name
         display.print((const char*)upcomingMedication.timeStr);
     } else if (medicationAlertActive && strlen(currentMedicationName) > 0) {
-        // Truncate long medication names
-        char shortName[10] = ""; // Buffer for shortened name
+         // Truncate name
+        char shortName[10];
         strncpy(shortName, currentMedicationName, 9);
-        shortName[9] = '\0'; // Ensure null termination
+        shortName[9] = '\0';
         display.print(shortName);
-        
-        // Flash "TAKE NOW" if medication is due
+        // Flash "TAKE NOW"
         if ((millis() / 500) % 2 == 0) {
-            display.setCursor(SCREEN_WIDTH/2 + 5, 40);
+            display.setCursor(SCREEN_WIDTH/2 + 5, 40); // Below name
             display.print("TAKE NOW");
+        } else {
+             // Clear the area when not flashing
+             display.fillRect(SCREEN_WIDTH/2 + 5, 40, SCREEN_WIDTH/2 - 5, 8, SH110X_BLACK);
         }
-    } else {
+    }
+     else {
         display.print("None due");
     }
 
-    // Horizontal line
-    display.drawFastHLine(0, 46, SCREEN_WIDTH, SH110X_WHITE);
+    // --- Bottom Separator ---
+    display.drawFastHLine(0, 50, SCREEN_WIDTH, SH110X_WHITE); // Adjusted y-coord
 
-    // Status bar - Bottom
-    display.setCursor(2, 52);
-    display.print("GPS: ");
-    // Check GPS status
+    // --- Status Bar ---
+    // GPS Status
+    display.drawBitmap(5, 53, locationIcon, 8, 8, SH110X_WHITE); // Adjusted coords
+    display.setCursor(15, 54); // Adjusted coords
+    display.print("GPS:");
     if (gpsDataUpdated) {
-        display.print(currentGpsData.validFix ? "Active" : "Search");
+        display.print(currentGpsData.validFix ? "Fix" : "Search");
     } else {
         display.print("N/A");
     }
 
-    // Display the GPS icon
-    display.drawBitmap(65, 52, locationIcon, 8, 8, SH110X_WHITE);
-
-    // Show fall alert if active
+    // Fall Status (Right side of status bar)
     if (fallDetectionUpdated && currentFallEvent.fallDetected) {
+        // Flash "FALL!" with icon
         if ((millis() / 500) % 2 == 0) {
-            display.setCursor(75, 52);
+            display.drawBitmap(SCREEN_WIDTH - 45, 53, alertIcon, 8, 8, SH110X_WHITE); // Adjusted coords
+            display.setCursor(SCREEN_WIDTH - 35, 54); // Adjusted coords
             display.print("FALL!");
+        } else {
+             // Clear the area when not flashing
+             display.fillRect(SCREEN_WIDTH - 45, 53, 45, 10, SH110X_BLACK);
         }
     }
+    // No "OK" status needed, keep it clean
 
     display.display();
 }
 
 // -------------------- Medication Reminder Display --------------------
+// Redesigned for clarity and urgency
 void displayMedicationReminder(const char* medicationName) {
     display.clearDisplay();
     display.setTextColor(SH110X_WHITE);
-    
-    // Create flashing border
-    if ((millis() / 500) % 2 == 0) {
+    display.setTextSize(1);
+
+    // --- Flashing Border ---
+    bool flashState = (millis() / 500) % 2 == 0;
+    if (flashState) {
         display.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SH110X_WHITE);
+        display.drawRect(1, 1, SCREEN_WIDTH-2, SCREEN_HEIGHT-2, SH110X_WHITE); // Thicker border
     }
-    
-    // Title
-    display.setTextSize(1);
-    display.setCursor(2, 2);
-    display.println("MEDICATION TIME");
-    
-    // Draw pill icon
-    display.drawBitmap(110, 2, pillIcon, 8, 8, SH110X_WHITE);
-    
-    // Status bar separator
-    display.drawFastHLine(0, 12, SCREEN_WIDTH, SH110X_WHITE);
-    
-    // Medicine name (larger text)
+    // No inverse needed, just flashing border
+
+    // --- Title ---
+    display.setTextSize(2); // Larger title
+    drawCenteredText("MEDICINE", 5, 2);
+
+    // --- Pill Icon --- (Centered below title)
+    display.drawBitmap((SCREEN_WIDTH - 8) / 2, 22, pillIcon, 8, 8, SH110X_WHITE);
+
+    // --- Medicine Name ---
+    display.setTextSize(1); // Use smaller text for potentially long names
+    char displayName[20]; // Allow slightly longer display
+    strncpy(displayName, medicationName, 19);
+    displayName[19] = '\0';
+    drawCenteredText(displayName, 35); // Centered below icon
+
+    // --- Instruction ---
     display.setTextSize(2);
-    
-    // Center text if possible, otherwise just display
-    if (strlen(medicationName) < 10) {
-        drawCenteredText(medicationName, 25, 2);
+    // Flash "TAKE NOW" text
+    if (flashState) {
+        drawCenteredText("TAKE NOW", 50, 2); // Large instruction
     } else {
-        // For longer names, use smaller text
-        display.setTextSize(1);
-        drawCenteredText(medicationName, 25);
+        // Clear the text area when not flashing
+        int16_t x1, y1;
+        uint16_t w, h;
+        display.getTextBounds("TAKE NOW", 0, 0, &x1, &y1, &w, &h);
+        display.fillRect((SCREEN_WIDTH - w) / 2, 50, w, h, SH110X_BLACK);
     }
-    
-    // Current time
-    display.setTextSize(1);
-    drawCenteredText(timeString, 48);
-    
-    // Add visual confirmation button
-    display.fillRoundRect((SCREEN_WIDTH - 90) / 2, 54, 90, 10, 3, SH110X_WHITE);
-    display.setTextColor(SH110X_BLACK);
-    drawCenteredText("CONFIRM TAKEN", 55);
-    display.setTextColor(SH110X_WHITE);
-    
+
+    // Removed the non-functional "Confirm Taken" button visual
+
     display.display();
 }
 
 // -------------------- Fall Alert Display --------------------
+// Redesigned for maximum visibility
 void displayFallAlert() {
     display.clearDisplay();
-    
-    // Make the text prominent with large size and flashing
+
+    // --- Flashing Inverse Background/Text ---
+    bool flashState = (millis() / 300) % 2 == 0; // Faster flash rate
+    display.fillScreen(flashState ? SH110X_WHITE : SH110X_BLACK);
+    display.setTextColor(flashState ? SH110X_BLACK : SH110X_WHITE);
+
+    // --- Alert Icon --- (Centered at top)
+    display.drawBitmap((SCREEN_WIDTH - 8) / 2, 5, alertIcon, 8, 8, flashState ? SH110X_BLACK : SH110X_WHITE);
+
+    // --- Main Message ---
     display.setTextSize(2);
-    display.setTextColor(SH110X_WHITE);
-    
-    // Create flashing border effect
-    if ((millis() / 250) % 2 == 0) {
-        display.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SH110X_WHITE);
-        display.drawRect(2, 2, SCREEN_WIDTH-4, SCREEN_HEIGHT-4, SH110X_WHITE);
-    }
-    
-    // Center and display the alert message
-    drawCenteredText("FALL", 15, 2);
-    drawCenteredText("DETECTED", 35, 2);
-    
-    // Display fall severity if available
-    if (fallDetectionUpdated && currentFallEvent.fallDetected) {
+    drawCenteredText("FALL", 20, 2); // Adjusted position
+    drawCenteredText("DETECTED", 40, 2); // Adjusted position
+
+    // --- Severity ---
+    if (fallDetectionUpdated && currentFallEvent.fallDetected && currentFallEvent.fallSeverity > 0) {
         display.setTextSize(1);
         char severityStr[20];
-        sprintf(severityStr, "Severity: %d/10", currentFallEvent.fallSeverity);
-        drawCenteredText(severityStr, 55);
+        sprintf(severityStr, "Severity: %d", currentFallEvent.fallSeverity); // Simplified text
+        // Position severity at the bottom
+        int16_t x1, y1;
+        uint16_t w, h;
+        display.getTextBounds(severityStr, 0, 0, &x1, &y1, &w, &h);
+        display.setCursor((SCREEN_WIDTH - w) / 2, SCREEN_HEIGHT - h - 2); // Bottom center
+        display.print(severityStr);
     }
-    
+
     display.display();
 }
 

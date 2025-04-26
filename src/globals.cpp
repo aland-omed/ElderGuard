@@ -16,6 +16,7 @@ SemaphoreHandle_t medicationSemaphore;
 SemaphoreHandle_t audioCommandSemaphore;
 SemaphoreHandle_t wifiStatusSemaphore;
 SemaphoreHandle_t timeStatusSemaphore;
+SemaphoreHandle_t telegramAlertSemaphore; // New semaphore for Telegram alerts
 
 // Shared ECG Data
 volatile EcgData currentEcgData;
@@ -28,6 +29,10 @@ volatile bool gpsDataUpdated = false;
 // Shared Fall Detection Data
 volatile FallEvent currentFallEvent;
 volatile bool fallDetectionUpdated = false;
+
+// Shared Telegram Alert Data
+volatile TelegramAlert currentTelegramAlert;
+volatile bool telegramAlertUpdated = false;
 
 // Shared Medication Data
 volatile MedicationReminder currentMedicationReminder;

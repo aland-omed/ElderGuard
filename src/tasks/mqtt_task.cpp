@@ -35,22 +35,39 @@ static PubSubClient mqttClient(tlsClient);
 // Status publish interval
 static const unsigned long STATUS_INTERVAL = 30000UL;
 static unsigned long lastStatusTs = 0;
+static unsigned long lastConnectAttempt = 0;
+static const unsigned long CONNECT_RETRY_INTERVAL = 5000UL; // Only try to connect every 5 seconds
 
 /**
  * Initialize the MQTT client
  */
 void setupMqtt() {
     tlsClient.setInsecure();
+    tlsClient.setTimeout(1); // Set very short timeout to prevent blocking
     mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
+    mqttClient.setKeepAlive(15); // 15 seconds keepalive
+    mqttClient.setSocketTimeout(1); // 1 second socket timeout to avoid blocking
     // No incoming callbacks required
 }
 
 /**
- * Attempt non-blocking MQTT connect
+ * Attempt non-blocking MQTT connect with timeout check
  */
 bool connectMqttNonBlocking() {
     if (mqttClient.connected()) return true;
-    if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS)) {
+    
+    // Only attempt to connect once every CONNECT_RETRY_INTERVAL
+    unsigned long now = millis();
+    if (now - lastConnectAttempt < CONNECT_RETRY_INTERVAL) {
+        return false;
+    }
+    
+    lastConnectAttempt = now;
+    Serial.println("Attempting MQTT connection...");
+    
+    // Set a connect timeout
+    if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS, TOPIC_STATUS, 0, true, "{\"status\":\"offline\"}", true)) {
+        Serial.println("MQTT connected!");
         // Publish retained "online" status
         StaticJsonDocument<128> doc;
         doc["status"] = "online";
@@ -58,88 +75,153 @@ bool connectMqttNonBlocking() {
         size_t n = serializeJson(doc, buf);
         mqttClient.publish(TOPIC_STATUS, (uint8_t*)buf, n, true);
         return true;
+    } else {
+        Serial.print("MQTT connect failed, rc=");
+        Serial.println(mqttClient.state());
+        return false;
     }
-    return false;
 }
 
 /**
- * Publish ECG data to MQTT broker
- * Enhanced to include raw ECG samples
+ * Publish ECG data to MQTT broker - with connection and timeout checks
  */
 void publishEcgData() {
-    if (ecgDataUpdated) {
-        StaticJsonDocument<512> doc;
-        doc["type"] = "ecg";
-        doc["heart_rate"] = currentEcgData.heartRate;
-        doc["valid"] = currentEcgData.validSignal ? 1 : 0;
-        doc["timestamp"] = time(nullptr);
-        
-        // Add raw ECG data samples from the circular buffer
-        JsonArray samples = doc.createNestedArray("ecg_data");
-        
-        // Add the most recent 30 samples for visualization
-        const int numSamples = 30;
+    if (!mqttClient.connected() || !ecgDataUpdated) {
+        return;
+    }
+    
+    // Take a local copy of the current ECG data to avoid race conditions
+    int localHeartRate = currentEcgData.heartRate;
+    bool localValidSignal = currentEcgData.validSignal;
+    
+    // Create a static document to prevent memory fragmentation
+    static StaticJsonDocument<512> doc;
+    doc.clear();
+    doc["type"] = "ecg";
+    doc["heart_rate"] = localHeartRate;
+    doc["valid"] = localValidSignal ? 1 : 0;
+    doc["timestamp"] = time(nullptr);
+    
+    // Add raw ECG data samples from the circular buffer
+    JsonArray samples = doc.createNestedArray("ecg_data");
+    
+    // Add a limited number of samples to avoid excessive data
+    const int numSamples = 10; // Reduced from 30 to minimize packet size
+    
+    // Copy sample data to a local buffer before adding to JSON to avoid race conditions
+    int localSamples[numSamples];
+    // Safely obtain ECG buffer data
+    if (xSemaphoreTake(ecgDataSemaphore, pdMS_TO_TICKS(10)) == pdTRUE) {
         for (int i = 0; i < numSamples; i++) {
             int idx = (bufferIndex - i - 1 + ECG_BUFFER_SIZE) % ECG_BUFFER_SIZE;
-            samples.add(ecgBuffer[idx]);
+            localSamples[i] = ecgBuffer[idx];
         }
-        
-        char buf[512];
-        size_t n = serializeJson(doc, buf);
-        
-        // Check if MQTT client is connected before publishing
-        if (mqttClient.connected()) {
-            mqttClient.publish(TOPIC_REALTIME, (uint8_t*)buf, n);
+        xSemaphoreGive(ecgDataSemaphore);
+    } else {
+        // If we can't get the semaphore, just use zeros
+        for (int i = 0; i < numSamples; i++) {
+            localSamples[i] = 0;
         }
+    }
+    
+    // Now add the local samples to the JSON document
+    for (int i = 0; i < numSamples; i++) {
+        samples.add(localSamples[i]);
+    }
+    
+    // Serialize the data
+    char buf[512];
+    size_t n = serializeJson(doc, buf);
+    
+    // Publish
+    bool published = mqttClient.publish(TOPIC_REALTIME, (uint8_t*)buf, n);
+    if (published) {
         ecgDataUpdated = false;
     }
 }
 
 /**
- * Publish GPS data to MQTT broker
+ * Publish GPS data to MQTT broker - with connection and timeout check
  */
 void publishGpsData() {
-    if (gpsDataUpdated) {
+    if (!mqttClient.connected() || !gpsDataUpdated) {
+        return;
+    }
+    
+    // Take a local copy of GPS data to avoid race conditions
+    float localLat = 0, localLng = 0;
+    bool validGpsData = false;
+    
+    if (xSemaphoreTake(gpsDataSemaphore, pdMS_TO_TICKS(10)) == pdTRUE) {
+        localLat = currentGpsData.latitude;
+        localLng = currentGpsData.longitude;
+        validGpsData = currentGpsData.validFix;
+        xSemaphoreGive(gpsDataSemaphore);
+    } else {
+        // If we can't get the semaphore, skip publication
+        return;
+    }
+    
+    // Only publish if we have valid GPS data
+    if (validGpsData) {
         StaticJsonDocument<256> doc;
         doc["type"]      = "gps";
-        doc["lat"]       = currentGpsData.latitude;
-        doc["lng"]       = currentGpsData.longitude;
+        doc["lat"]       = localLat;
+        doc["lng"]       = localLng;
         doc["timestamp"] = time(nullptr);
         char buf[256];
         size_t n = serializeJson(doc, buf);
-        mqttClient.publish(TOPIC_REALTIME, (uint8_t*)buf, n);
-        gpsDataUpdated = false;
+        bool published = mqttClient.publish(TOPIC_REALTIME, (uint8_t*)buf, n);
+        if (published) {
+            gpsDataUpdated = false;
+        }
     }
 }
 
 /**
- * Main FreeRTOS MQTT task
+ * Main FreeRTOS MQTT task - with yield guarantees
  */
 void mqttTask(void* pvParameters) {
     setupMqtt();
+    
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(20);
 
     while (true) {
-        vTaskDelay(pdMS_TO_TICKS(20));
+        // Ensure we yield regularly using vTaskDelayUntil instead of vTaskDelay
+        // This ensures consistent timing and prevents watchdog issues
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
+        // Skip all MQTT operations if WiFi is not connected
         if (!getWiFiConnected()) {
             continue;
         }
 
+        // Try to connect, but with timeout protection
         connectMqttNonBlocking();
-        mqttClient.loop();
-
-        // Re-enable ECG data publishing, now with raw data
-        publishEcgData();
-        publishGpsData();
-
-        unsigned long now = millis();
-        if (now - lastStatusTs >= STATUS_INTERVAL) {
-            lastStatusTs = now;
-            StaticJsonDocument<128> doc;
-            doc["status"] = "online";
-            char buf[128];
-            size_t n = serializeJson(doc, buf);
-            mqttClient.publish(TOPIC_STATUS, (uint8_t*)buf, n, true);
+        
+        // Only call loop() if we're connected to avoid blocking
+        if (mqttClient.connected()) {
+            mqttClient.loop();
+            
+            // Publish data if needed - these functions have their own connection checks
+            publishEcgData();
+            publishGpsData();
+            
+            // Send periodic status updates
+            unsigned long now = millis();
+            if (now - lastStatusTs >= STATUS_INTERVAL) {
+                lastStatusTs = now;
+                
+                StaticJsonDocument<128> doc;
+                doc["status"] = "online";
+                char buf[128];
+                size_t n = serializeJson(doc, buf);
+                mqttClient.publish(TOPIC_STATUS, (uint8_t*)buf, n, true);
+            }
         }
+        
+        // Yield to other tasks
+        taskYIELD();
     }
 }

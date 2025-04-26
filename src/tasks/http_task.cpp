@@ -79,6 +79,40 @@ void httpTask(void *pvParameters) {
     // Only proceed if WiFi is connected
     if (getWiFiConnected()) {
       
+      // First priority: Check for pending Telegram alerts from fall detection
+      // This ensures fall alerts are sent as soon as possible
+      if (xSemaphoreTake(telegramAlertSemaphore, pdMS_TO_TICKS(10)) == pdTRUE) {
+        if (telegramAlertUpdated && currentTelegramAlert.pending) {
+          // Send the main alert message - cast volatile char* to const char*
+          sendTelegramMessage((const char*)currentTelegramAlert.message);
+          
+          // If location data is available, send as a separate message
+          if (currentTelegramAlert.hasFallLocation && 
+              xSemaphoreTake(gpsDataSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
+            
+            // Create and send the location message with Google Maps link
+            if (currentGpsData.validFix) {
+              char locationMsg[128];
+              snprintf(locationMsg, sizeof(locationMsg), 
+                      "https://maps.google.com/maps?q=%.6f,%.6f", 
+                      currentGpsData.latitude, currentGpsData.longitude);
+              
+              // Send as a separate message
+              sendTelegramMessage(locationMsg);
+            }
+            
+            xSemaphoreGive(gpsDataSemaphore);
+          }
+          
+          // Mark as processed
+          currentTelegramAlert.pending = false;
+          telegramAlertUpdated = false;
+          Serial.println("HTTP Task: Fall detection Telegram alert processed successfully");
+        }
+        
+        xSemaphoreGive(telegramAlertSemaphore);
+      }
+      
       // Send sensor data at regular intervals
       if (currentTime - lastSensorDataSend >= HTTP_PUBLISH_INTERVAL_MS) {
         sendSensorData();
@@ -434,8 +468,14 @@ void sendTelegramMessage(const char* message) {
   http.setTimeout(HTTP_TIMEOUT);
   http.addHeader("Content-Type", "application/json");
   
-  // Create the JSON payload
-  String payload = "{\"chat_id\":\"" + String(TELEGRAM_CHAT_ID) + "\",\"text\":\"" + message + "\"}";
+  // Create a JSON document for properly escaping special characters
+  StaticJsonDocument<384> doc;
+  doc["chat_id"] = TELEGRAM_CHAT_ID;
+  doc["text"] = message;  // ArduinoJson will properly escape the message
+  
+  // Serialize the JSON to string
+  String payload;
+  serializeJson(doc, payload);
   
   // Send the request and get the response code
   int httpResponseCode = http.POST(payload);

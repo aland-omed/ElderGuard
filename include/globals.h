@@ -21,6 +21,7 @@ extern SemaphoreHandle_t medicationSemaphore;
 extern SemaphoreHandle_t audioCommandSemaphore;
 extern SemaphoreHandle_t wifiStatusSemaphore;
 extern SemaphoreHandle_t timeStatusSemaphore;
+extern SemaphoreHandle_t telegramAlertSemaphore; // New semaphore for Telegram alerts
 
 // Shared ECG Data
 extern volatile EcgData currentEcgData;
@@ -40,6 +41,17 @@ typedef struct {
     char timeStr[6];       // Time string (HH:MM)
     bool available;        // Whether there is an upcoming medication
 } UpcomingMedication;
+
+// Telegram Alert Structure
+typedef struct {
+    char message[256];     // Message text
+    bool hasFallLocation;  // Whether to include location data with message
+    bool pending;          // Whether the message needs to be sent
+} TelegramAlert;
+
+// Shared Telegram Alert Data
+extern volatile TelegramAlert currentTelegramAlert;
+extern volatile bool telegramAlertUpdated;
 
 // Shared Medication Data
 extern volatile MedicationReminder currentMedicationReminder;
