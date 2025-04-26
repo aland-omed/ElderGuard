@@ -74,11 +74,8 @@ float previousAccMagnitude = 0;
 float accelerationIntegral = 0; // For tracking consistent acceleration
 
 void fallDetectionTask(void *pvParameters) {
-  Serial.println("Fall Detection Task: Started");
-  
   // Initialize MPU6050
   if (!mpu.begin()) {
-    Serial.println("Failed to find MPU6050 chip");
     while (1) {
       vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -88,8 +85,6 @@ void fallDetectionTask(void *pvParameters) {
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
-  
-  Serial.println("MPU6050 initialized successfully");
   
   // Calibrate the accelerometer to establish a baseline
   calibrateAccelerometer();
@@ -117,9 +112,6 @@ void fallDetectionTask(void *pvParameters) {
 }
 
 void calibrateAccelerometer() {
-  Serial.println("Calibrating baseline orientation...");
-  Serial.println("Keep device stationary");
-  
   // Take multiple samples for better baseline
   const int numSamples = 100;
   float pitchSum = 0, rollSum = 0, yawSum = 0;
@@ -148,11 +140,6 @@ void calibrateAccelerometer() {
   orientation.baselinePitch = pitchSum / numSamples;
   orientation.baselineRoll = rollSum / numSamples;
   orientation.baselineYaw = yawSum / numSamples;
-  
-  Serial.println("Calibration complete");
-  Serial.print("Baseline pitch: "); Serial.println(orientation.baselinePitch);
-  Serial.print("Baseline roll: "); Serial.println(orientation.baselineRoll);
-  Serial.print("Baseline yaw: "); Serial.println(orientation.baselineYaw);
 }
 
 void updateOrientation(sensors_event_t accel, sensors_event_t gyro) {
@@ -210,8 +197,6 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
         stateStartTime = currentTime;
         peakAcceleration = 0;
         minAcceleration = accMagnitude;
-        
-        Serial.println("Fall Detection: Potential fall detected - Low acceleration");
       }
       break;
       
@@ -226,11 +211,6 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
           // Count this as one impact
           consecutiveImpacts++;
           
-          Serial.print("Fall Detection: Impact detected - Acceleration: ");
-          Serial.print(accMagnitude);
-          Serial.print(", Count: ");
-          Serial.println(consecutiveImpacts);
-          
           // Check if we have enough consecutive impact readings
           if (consecutiveImpacts >= config.requiredConsecutiveImpacts) {
             currentState = IMPACT_DETECTED;
@@ -243,7 +223,6 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
       if (currentTime - stateStartTime > config.maxFreefallWindow) {
         currentState = MONITORING;
         consecutiveImpacts = 0;
-        Serial.println("Fall Detection: Potential fall timeout - No impact detected");
       }
       break;
       
@@ -292,7 +271,6 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
         } else {
           // Not a fall
           currentState = MONITORING;
-          Serial.println("Fall Detection: Movement pattern doesn't match a fall");
         }
       }
       break;
@@ -315,37 +293,17 @@ void processFallDetection(sensors_event_t accel, sensors_event_t gyro) {
           // Signal other tasks about the reset
           xSemaphoreGive(fallDetectionSemaphore);
         }
-        
-        Serial.println("Fall Detection: Reset to monitoring state after 40 seconds");
       }
       break;
   }
 }
 
 void reportFallEvent(float pitchChange, float rollChange) {
-  Serial.println("\n!!! FALL DETECTED !!!");
-  
   // Determine fall direction
   bool forwardFall = pitchChange < -config.orientationChangeThreshold;
   bool backwardFall = pitchChange > config.orientationChangeThreshold;
   bool leftFall = rollChange < -config.orientationChangeThreshold;
   bool rightFall = rollChange > config.orientationChangeThreshold;
-  
-  // Report fall direction
-  Serial.print("Fall Direction: ");
-  if (forwardFall) Serial.print("Forward ");
-  if (backwardFall) Serial.print("Backward ");
-  if (leftFall) Serial.print("Left ");
-  if (rightFall) Serial.print("Right ");
-  Serial.println();
-  
-  // Report fall metrics
-  Serial.print("Peak acceleration: "); Serial.print(peakAcceleration); Serial.print(" m/s²");
-  Serial.print("Min acceleration: "); Serial.print(minAcceleration); Serial.println(" m/s²");
-  
-  // Orientation after fall
-  Serial.print("Final orientation - Pitch: "); Serial.print(orientation.pitch);
-  Serial.print(", Roll: "); Serial.println(orientation.roll);
   
   // Update fall event global structure and signal other tasks
   if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -364,8 +322,6 @@ void reportFallEvent(float pitchChange, float rollChange) {
     
     // Signal other tasks that fall event data is updated
     xSemaphoreGive(fallDetectionSemaphore);
-    
-    Serial.println("Fall event signaled - Would send HTTP alert immediately");
     
     // Prepare Telegram message in a thread-safe manner
     if (xSemaphoreTake(telegramAlertSemaphore, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -386,16 +342,12 @@ void reportFallEvent(float pitchChange, float rollChange) {
         if (locationAvailable) {
           lat = currentGpsData.latitude;
           lng = currentGpsData.longitude;
-          Serial.printf("Fall Detection: Valid GPS coordinates found: %.6f, %.6f\n", lat, lng);
-        } else {
-          Serial.println("Fall Detection: No valid GPS coordinates available");
         }
         
         // Always ensure we release the semaphore
         xSemaphoreGive(gpsDataSemaphore);
       } else {
         // If we couldn't take the semaphore, don't block and proceed without GPS data
-        Serial.println("Fall Detection: Could not access GPS data (semaphore timeout)");
         locationAvailable = false;
       }
       
@@ -420,9 +372,6 @@ void reportFallEvent(float pitchChange, float rollChange) {
       telegramAlertUpdated = true;
       
       xSemaphoreGive(telegramAlertSemaphore);
-      
-      // HTTP task will check telegramAlertUpdated flag and handle sending
-      Serial.println("Telegram alert queued for sending by HTTP task");
     }
   }
 }

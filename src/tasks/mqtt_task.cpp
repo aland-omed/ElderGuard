@@ -63,11 +63,9 @@ bool connectMqttNonBlocking() {
     }
     
     lastConnectAttempt = now;
-    Serial.println("Attempting MQTT connection...");
     
     // Set a connect timeout
     if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS, TOPIC_STATUS, 0, true, "{\"status\":\"offline\"}", true)) {
-        Serial.println("MQTT connected!");
         // Publish retained "online" status
         StaticJsonDocument<128> doc;
         doc["status"] = "online";
@@ -76,8 +74,6 @@ bool connectMqttNonBlocking() {
         mqttClient.publish(TOPIC_STATUS, (uint8_t*)buf, n, true);
         return true;
     } else {
-        Serial.print("MQTT connect failed, rc=");
-        Serial.println(mqttClient.state());
         return false;
     }
 }

@@ -14,8 +14,6 @@
 #include "../include/globals.h"
 
 void wifiTask(void *pvParameters) {
-  Serial.println("WiFi Task: Started");
-  
   // Initialize WiFi status
   currentWiFiStatus.connected = false;
   currentWiFiStatus.rssi = 0;
@@ -57,8 +55,6 @@ void wifiTask(void *pvParameters) {
 }
 
 void setupWiFi(volatile WiFiStatus *status) {
-  Serial.println("WiFi Task: Setting up WiFi");
-  
   // Set WiFi mode to station (client)
   WiFi.mode(WIFI_STA);
   
@@ -70,14 +66,9 @@ void setupWiFi(volatile WiFiStatus *status) {
   
   // Wait a moment for WiFi to initialize
   delay(100);
-  
-  Serial.println("WiFi Task: WiFi setup complete");
 }
 
 bool connectToWiFi(volatile WiFiStatus *status) {
-  Serial.print("WiFi Task: Connecting to WiFi network: ");
-  Serial.println(WIFI_SSID);
-  
   // Record connection attempt time
   status->lastConnectAttempt = millis();
   
@@ -88,9 +79,7 @@ bool connectToWiFi(volatile WiFiStatus *status) {
   unsigned long startTime = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startTime < WIFI_CONNECT_TIMEOUT_MS) {
     delay(500);
-    Serial.print(".");
   }
-  Serial.println();
   
   // Check if connected
   if (WiFi.status() == WL_CONNECTED) {
@@ -105,12 +94,6 @@ bool connectToWiFi(volatile WiFiStatus *status) {
     
     status->failureCount = 0;
     
-    Serial.print("WiFi Task: Connected to WiFi! IP address: ");
-    // Copy volatile data to temporary buffer for printing
-    char ipBuffer[16];
-    memcpy(ipBuffer, (const void*)status->ip, sizeof(ipBuffer));
-    Serial.println(ipBuffer);
-    
     // Update shared WiFi status
     xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100));
     wifiStatusUpdated = true;
@@ -122,10 +105,6 @@ bool connectToWiFi(volatile WiFiStatus *status) {
     status->connected = false;
     status->failureCount++;
     
-    Serial.println("WiFi Task: Failed to connect to WiFi!");
-    Serial.print("WiFi Task: Failure count: ");
-    Serial.println(status->failureCount);
-    
     // Update shared WiFi status
     xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100));
     wifiStatusUpdated = true;
@@ -136,8 +115,6 @@ bool connectToWiFi(volatile WiFiStatus *status) {
 }
 
 bool reconnectWiFi(volatile WiFiStatus *status) {
-  Serial.println("WiFi Task: Attempting to reconnect to WiFi");
-  
   // Just use the connect function for reconnection
   return connectToWiFi(status);
 }
@@ -154,7 +131,6 @@ void updateWiFiStatus(volatile WiFiStatus *status) {
   if (WiFi.status() != WL_CONNECTED) {
     // If we thought we were connected but we're not anymore
     if (status->connected) {
-      Serial.println("WiFi Task: WiFi connection lost!");
       status->connected = false;
       
       // Update shared WiFi status
@@ -186,15 +162,6 @@ void updateWiFiStatus(volatile WiFiStatus *status) {
     xSemaphoreTake(displayMutex, pdMS_TO_TICKS(100));
     wifiStatusUpdated = true;
     xSemaphoreGive(displayMutex);
-    
-    Serial.print("WiFi Task: Status updated - RSSI: ");
-    Serial.print(status->rssi);
-    Serial.print(" dBm, IP: ");
-    
-    // Copy again to a temporary buffer for printing
-    char ipForPrint[16];
-    memcpy(ipForPrint, (const void*)status->ip, sizeof(ipForPrint));
-    Serial.println(ipForPrint);
   }
 }
 
